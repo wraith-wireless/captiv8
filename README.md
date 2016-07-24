@@ -1,15 +1,5 @@
 # CAPTIV8 0.0.1: Captive Portal Evasion
 
-<pre>
- ____     ______  ____    ______  ______   __  __  ____       __     
-/\  _`\  /\  _  \/\  _`\ /\__  _\/\__  _\ /\ \/\ \/\  _`\   /'_ `\   
-\ \ \/\_\\ \ \L\ \ \ \L\ \/_/\ \/\/_/\ \/ \ \ \ \ \ \ \L\_\/\ \L\ \  
- \ \ \/_/_\ \  __ \ \ ,__/  \ \ \   \ \ \  \ \ \ \ \ \  _\L\/_> _ <_ 
-  \ \ \L\ \\ \ \/\ \ \ \/    \ \ \   \_\ \__\ \ \_/ \ \ \L\ \/\ \L\ \
-   \ \____/ \ \_\ \_\ \_\     \ \_\  /\_____\\ `\___/\ \____/\ \____/
-    \/___/   \/_/\/_/\/_/      \/_/  \/_____/ `\/__/  \/___/  \/___/ 
-</pre>
-
 [![License: GPLv3](https://img.shields.io/pypi/l/captiv8.svg)](https://github.com/wraith-wireless/captiv8/blob/master/LICENSE)
 [![PyPI Version](https://img.shields.io/pypi/v/captiv8.svg)](https://pypi.python.org/pypi/captiv8)
 [![Downloads per month on PyPI](https://img.shields.io/pypi/dm/captiv8.svg)](https://pypi.python.org/pypi/captiv8)

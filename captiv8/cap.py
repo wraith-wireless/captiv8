@@ -39,9 +39,21 @@ import captiv8
 def execute(dev):
     print "running captiv8 on device", dev 
 
+banner1 = """
+   ___     _____   _____  _______  _______  _     _   _____
+ _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)
+(_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)
+(_)    _ (_______)(_____)   (_)      (_)   (_)   (_) (_____)
+(_)___(_)(_)   (_)(_)       (_)    __(_)__  (_)_(_) (_)___(_)
+  (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)
+
+-------------------------------------------------------------
+               captiv8 v{0} Copyright {1}
+""".format(captiv8.version,captiv8.__date__)
 if __name__ == '__main__':
     # create arg parser and parse command line args
-    print "captiv8 v{0}".format(captiv8.version)
+    #print "captiv8 v{0}".format(captiv8.version)
+    print banner1
     argp = ap.ArgumentParser(description="Captive Portal Evasion")
     argp.add_argument('-i','--interface',help="Wireless Device")
     argp.add_argument('-s','--ssid',help="Desired SSID")
