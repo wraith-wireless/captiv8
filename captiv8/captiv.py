@@ -32,15 +32,10 @@ __maintainer__ = 'Dale Patterson'
 __email__ = 'wraith.wireless@yandex.com'
 __status__ = 'Development'
 
-#import argparse as ap                  # cli arg parsing
-import time
 import curses
 import captiv8
 
-def execute(dev):
-    print "running captiv8 on device", dev 
-
-banner = [
+_BANNER_ = [
 "            ___     _____   _____  _______  _______  _     _   _____",
 "          _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)",
 "         (_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)",
@@ -52,70 +47,78 @@ banner = [
                                                          captiv8.__date__)
 ]
 
+def setup():
+    """
+     sets console and main window up
+    :returns: the main window object
+    """
+    # setup the console
+    main = curses.initscr() # get a window object
+    curses.noecho()         # turn off key echoing
+    curses.cbreak()         # turn off key buffering
+    main.keypad(1)          # let curses handle multibyte special keys
+    main.clear()            # erase everything
+    banner(main)            # write the banner
+    mainmenu(main)          # then the main and menu
+    main.border(0)          # place a border
+    main.refresh()          # and show everything
+
+    # try adding a subwindow for info 4 x n
+    nr,nc = main.getmaxyx()
+    #info = main.subwin(2,nr-5)
+    info = main.derwin(5,nc-4,nr-6,2)
+    info.border(0)
+    info.refresh()
+
+    return main,info
+
+def banner(win):
+    """
+     writes the banner (caller will need to refresh)
+     :param win: main window
+    """
+    for i, line in enumerate(_BANNER_): win.addstr(i + 1, 1, line)
+
+def mainmenu(win):
+    """
+     writes the main menu (caller will need to refresh)
+     :param win: the main window
+    """
+    win.addstr(10, 3, "MENU: choose one")
+    win.addstr(11, 5, "[C|c]onfigure")
+    win.addstr(12, 5, "[R|r]un")
+    win.addstr(13, 5, "[M|m]etrics")
+    win.addstr(14, 5, "[Q|q]uit")
+
+def teardown(win):
+    """
+     returns console to normal state
+     :param win: the window
+    """
+    # tear down the console
+    curses.nocbreak()
+    win.keypad(0)
+    curses.echo()
+    curses.endwin()
+
 if __name__ == '__main__':
-    window = None
+    mainwin = infowin = None
+    mainwin, infowin = setup()
     try:
-        # setup the console
-        window = curses.initscr() # get a window object
-        #curses.start_color()
-        curses.noecho()           # turn off key echoing
-        curses.cbreak()           # turn off buffering
-        window.keypad(1)          # let curses handle multibyte special keys
-        window.clear()
-        window.border(0)
-        window.refresh()
 
-        # put the banner
-        for i,line in enumerate(banner): window.addstr(i+1,1,line)
-        window.refresh()
 
-        # put the initial menu
-        window.addstr(10,5,"[Q] - Quit")
-
-        # loop
+        # execution loop
         ch = '!'
         while True:
             if ch == ord('Q') or ch == ord('q'): break
-            ch = window.getch()
-    except KeyboardInterrupt:
-        pass
-    except curses.error as e:
-        pass
+            ch = mainwin.getch()
+    except KeyboardInterrupt: pass
+    except curses.error as e: pass
     finally:
-        # tear down the console
-        curses.nocbreak()
-        window.keypad(0)
-        curses.echo()
-        curses.endwin()
+        teardown(mainwin)
 
-banner1 = """
---------------------------------------------------------------------------------
-             ___     _____   _____  _______  _______  _     _   _____
-           _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)
-          (_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)
-          (_)    _ (_______)(_____)   (_)      (_)   (_)   (_) (_____)
-          (_)___(_)(_)   (_)(_)       (_)    __(_)__  (_)_(_) (_)___(_)
-            (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)
-
---------------------------------------------------------------------------------
-                      captiv8 v{0} Copyright {1}
-""".format(captiv8.version, captiv8.__date__)
-#if __name__ == '__main__':
-#    # create arg parser and parse command line args
-#    #print "captiv8 v{0}".format(captiv8.version)
-#    print banner1
-#    argp = ap.ArgumentParser(description="Captive Portal Evasion")
-#    argp.add_argument('-i', '--interface', help="Wireless Device")
-#    argp.add_argument('-s', '--ssid', help="Desired SSID")
-#    args = argp.parse_args()
-#    usage = "usage: python captiv8-ui.py -i <dev> -s <ssid>"
-#    try:
-#        dname = args.interface
-#        ssid = args.ssid
-#        if dname is None or ssid is None:
-#            print(usage)
-#            sys.exit(0)
-#        execute(dname)
-#    except Exception as e:
-#        print e
-#        sys.exit(0)
+"""
+ADDITIONAL STUFF THAT MIGHT COME IN HANDY LATER
+rows, columns = window.getmaxyx()
+curses.start_color()
+"""
