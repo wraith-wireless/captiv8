@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-""" cap.py: Captive Portal Evasion Tool
+""" capitv8-ui.py: Captive Portal Evasion Tool
 
 Copyright (C) 2016  Dale V. Patterson (wraith.wireless@yandex.com)
 
@@ -23,7 +23,7 @@ modifications, are permitted provided that the following conditions are met:
 Provides the command line interface to captiv8
 """
 
-#__name__ = 'cap'
+#__name__ = 'capitv8-ui'
 __license__ = 'GPLv3'
 __version__ = '0.0.1'
 __date__ = 'July 2016'
@@ -40,25 +40,26 @@ def execute(dev):
     print "running captiv8 on device", dev 
 
 banner1 = """
-   ___     _____   _____  _______  _______  _     _   _____
- _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)
-(_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)
-(_)    _ (_______)(_____)   (_)      (_)   (_)   (_) (_____)
-(_)___(_)(_)   (_)(_)       (_)    __(_)__  (_)_(_) (_)___(_)
-  (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)
+--------------------------------------------------------------------------------
+             ___     _____   _____  _______  _______  _     _   _____
+           _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)
+          (_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)
+          (_)    _ (_______)(_____)   (_)      (_)   (_)   (_) (_____)
+          (_)___(_)(_)   (_)(_)       (_)    __(_)__  (_)_(_) (_)___(_)
+            (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)
 
--------------------------------------------------------------
-               captiv8 v{0} Copyright {1}
-""".format(captiv8.version,captiv8.__date__)
+--------------------------------------------------------------------------------
+                      captiv8 v{0} Copyright {1}
+""".format(captiv8.version, captiv8.__date__)
 if __name__ == '__main__':
     # create arg parser and parse command line args
     #print "captiv8 v{0}".format(captiv8.version)
     print banner1
     argp = ap.ArgumentParser(description="Captive Portal Evasion")
-    argp.add_argument('-i','--interface',help="Wireless Device")
-    argp.add_argument('-s','--ssid',help="Desired SSID")
+    argp.add_argument('-i', '--interface', help="Wireless Device")
+    argp.add_argument('-s', '--ssid', help="Desired SSID")
     args = argp.parse_args()
-    usage = "usage: python cap.py -i <dev> -s <ssid>"
+    usage = "usage: python captiv8-ui.py -i <dev> -s <ssid>"
     try:
         dname = args.interface
         ssid = args.ssid
