@@ -49,7 +49,7 @@ banner = [
 "           (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)",
 "",
 "                     captiv8 v{0} Copyright {1}".format(captiv8.version,
-                                                          captiv8.__date__)
+                                                         captiv8.__date__)
 ]
 
 if __name__ == '__main__':
@@ -57,6 +57,7 @@ if __name__ == '__main__':
     try:
         # setup the console
         window = curses.initscr() # get a window object
+        #curses.start_color()
         curses.noecho()           # turn off key echoing
         curses.cbreak()           # turn off buffering
         window.keypad(1)          # let curses handle multibyte special keys
@@ -65,15 +66,20 @@ if __name__ == '__main__':
         window.refresh()
 
         # put the banner
-        for i,line in enumerate(banner):
-            window.addstr(i+1,1,line)
+        for i,line in enumerate(banner): window.addstr(i+1,1,line)
         window.refresh()
 
+        # put the initial menu
+        window.addstr(10,5,"[Q] - Quit")
+
         # loop
-        while True: time.sleep(1)
+        ch = '!'
+        while True:
+            if ch == ord('Q') or ch == ord('q'): break
+            ch = window.getch()
     except KeyboardInterrupt:
         pass
-    except curses.error:
+    except curses.error as e:
         pass
     finally:
         # tear down the console
