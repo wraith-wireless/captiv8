@@ -1,7 +1,2 @@
 # setup paramaters for captiv8 via PyPi/pip install
 include LICENSE CHANGES README.md
-
-# Include subdirectories
-# note to self: even including recursive-include here, have to follow up by
-# ensuring data (non .py) files are also referenced in setup.py
-

@@ -17,8 +17,8 @@ open networks and as a tool to test your captive portal or guest networks.
 
 ### a. Requirements
 captiv8 requires a Linux box preferred kernel 3.13.x and greater and Python 2.7.
-It also requires the packages Scapy and PyRIC. You'll also need at a minimum, one3
-wireless card that supports monitor mode. And of course, an open network to test.
+It also requires the packages Scapy and PyRIC. You'll also need a wireless card 
+that supports monitor mode and nl80211. And of course, an open network to test.
 
 ### b. Install from Package Manager
 Obviously, the easiest way to install captiv8 is through PyPI:
@@ -29,10 +29,6 @@ ATT, captiv8 is still in POC mode and has not been packaged and uploaded to PyPI
 
 ### c. Install from Source
 Download the captiv8 tarball, untar and execute:
-```bash
-sudo python cap.py -i <dev> -s <ssid>
-```
-
 
 ## 3. USING
 TBD

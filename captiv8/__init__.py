@@ -61,5 +61,5 @@ While this could be used nefariously, IOT evade paying a subscription fee, the
 primary purpose and intent is to build a tool that allows for some anonymity on
 open networks and as a tool to test your captive portal or guest networks.
 
-captiv8 is an evil twin on the STA side.
+In short, captiv8 is an evil twin on the STA side.
 """

@@ -43,11 +43,11 @@ setup(name='captiv8',
       url='http://wraith-wireless.github.io/captiv8/',
       download_url="https://github.com/wraith-wireless/captiv8/archive/"+captiv8.version+".tar.gz",
       author=captiv8.__author__,
-      author_email=pyric.__email__,
+      author_email=captiv8.__email__,
       maintainer=captiv8.__maintainer__,
       maintainer_email=captiv8.__email__,
       license=captiv8.__license__,
-      classifiers=['Development Status :: 5 - Production/Stable',
+      classifiers=['Development Status :: 4 - Beta',
                    'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
                    'Intended Audience :: Developers',
                    'Intended Audience :: System Administrators',
@@ -61,6 +61,6 @@ setup(name='captiv8',
                    'Programming Language :: Python :: 2.7'],
     keywords='Linux Python pentest hacking wireless WLAN WiFi 802.11',
     packages=find_packages(),
-    #package_data={'pyric':['nlhelp/*.help','utils/data/*.txt']}
+    install_requires = ['PyRIC']
     # TODO: add dependencies
 )
