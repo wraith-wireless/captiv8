@@ -61,15 +61,9 @@ def setup():
     banner(main)            # write the banner
     mainmenu(main)          # then the main and menu
     main.border(0)          # place a border
+    info = infowindow(main) # write the info panel/window
+    curses.curs_set(0)      # hide the cursor
     main.refresh()          # and show everything
-
-    # try adding a subwindow for info 4 x n
-    nr,nc = main.getmaxyx()
-    #info = main.subwin(2,nr-5)
-    info = main.derwin(5,nc-4,nr-6,2)
-    info.border(0)
-    info.refresh()
-
     return main,info
 
 def banner(win):
@@ -90,6 +84,19 @@ def mainmenu(win):
     win.addstr(13, 5, "[M|m]etrics")
     win.addstr(14, 5, "[Q|q]uit")
 
+def infowindow(win):
+    """
+     create an info window as derived window of main window win
+    :param win: main window
+    :returns: the info window
+    """
+    # try adding a subwindow for info 4 x n
+    nr, nc = win.getmaxyx()
+    info = win.derwin(5, nc - 4, nr - 6, 2)
+    info.border(0)
+    info.refresh()
+    return info
+
 def teardown(win):
     """
      returns console to normal state
@@ -103,19 +110,22 @@ def teardown(win):
 
 if __name__ == '__main__':
     mainwin = infowin = None
-    mainwin, infowin = setup()
+    err = None
     try:
+        mainwin, infowin = setup()
 
-
+        infowin.addstr(3, 1, "STATE:")
+        infowin.refresh()
         # execution loop
         ch = '!'
         while True:
             if ch == ord('Q') or ch == ord('q'): break
             ch = mainwin.getch()
     except KeyboardInterrupt: pass
-    except curses.error as e: pass
+    except curses.error as e: err = e
     finally:
         teardown(mainwin)
+        if err: print err
 
 """
 ADDITIONAL STUFF THAT MIGHT COME IN HANDY LATER
