@@ -47,7 +47,7 @@ _BANNER_ = [
 def setup():
     """
      sets console and main window up
-    :returns: the main window object
+     :returns: the main window object, info window object
     """
     # setup the console
     main = curses.initscr()            # get a window object
@@ -61,7 +61,7 @@ def setup():
     main.attron(curses.color_pair(1))  # make the border red
     main.border(0)                     # place the border
     main.attroff(curses.color_pair(1)) # turn off the red
-    info = infowindow(main)            # write the info panel/window
+    info = infowindow(main)            # create the info panel/window
     curses.curs_set(0)                 # hide the cursor
     main.refresh()                     # and show everything
     return main,info
@@ -117,12 +117,56 @@ def infowindow(win):
     """
     # try adding a subwindow for info 4 x n
     nr,nc = win.getmaxyx()
-    info = win.derwin(5,nc-4,nr-6,2)
+    #info = win.derwin(5,nc-4,nr-6,2)
+    info = win.derwin(6,nc-4,nr-7,2)
     info.attron(curses.color_pair(4))  # make the border blue
     info.border(0)
     info.attron(curses.color_pair(4))  # make the border blue
     info.refresh()
     return info
+
+_IPLEN_  = 15
+_MACLEN_ = 17
+_SSIDLEN_ = 32
+def updateinfo(win,state):
+    """
+     writes current state to info window
+     :param win: the info window
+     :param state: current state
+    """
+    # infowin.addstr(3,1,"STATE:",curses.color_pair(7))
+    # line 1, contains the SSID and BSSID entries
+    # line 2, contains the MAC and ip entries
+    nr,nc = win.getmaxyx()
+    win.addstr(1,1,"SSID:",curses.color_pair(0))
+    win.addstr(1,nc-25,"BSSID:",curses.color_pair(0)) # mac is 17 chars
+    win.addstr(2,1,"MAC:",curses.color_pair(0))
+    win.addstr(2,nc-22,"IP:",curses.color_pair(0))
+
+    # add empty lines
+    win.addstr(1,7,'-'*_SSIDLEN_,curses.color_pair(0))
+    win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,curses.color_pair(0))
+    win.addstr(2,7,'-'*_MACLEN_,curses.color_pair(0))
+    win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,curses.color_pair(0))
+
+    color = curses.color_pair(1)
+    symbol = '?'
+    if state == _STATE_INVALID_: pass
+    elif state == _STATE_CONFIGURED_:
+        color = curses.color_pair(1)
+        symbol = '-'
+    elif state == _STATE_OPERATIONAL_:
+        color = curses.color_pair(2)
+        symbol = '+'
+    else:
+        color = curses.color_pair(1) if state == _STATE_STOPPED_ else curses.color_pair(3)
+        symbol = '/'
+    win.addstr(4,1,'[',curses.color_pair(0))
+    win.addstr(4,2,symbol,color)
+    win.addstr(4,3,']',curses.color_pair(0))
+    win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),curses.color_pair(0))
+    win.refresh()
+
 
 def teardown(win):
     """
@@ -135,13 +179,38 @@ def teardown(win):
     curses.echo()
     curses.endwin()
 
+#### STATE DEFINITIONS
+_STATE_INVALID_     = 0
+_STATE_CONFIGURED_  = 1
+_STATE_SCANNING_    = 2
+_STATE_STOPPED_     = 3
+_STATE_CONNECTING_  = 4
+_STATE_CONNECTED_   = 5
+_STATE_GETTINGIP_   = 6
+_STATE_VERIFYING_   = 7
+_STATE_OPERATIONAL_ = 8
+_STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
+                      'connected','gettingip','verifying','operational']
+#_STATE_FLAGS_ = {
+#'invalid': (1 << _STATE_INVALID_),         # not configured
+#'configured': (1 << _STATE_CONFIGURED_),   # configured but not running
+#'scanning': (1 << _STATE_SCANNING_),       # scanning
+#'stopped': (1 << _STATE_STOPPED_),         # not running but has been
+#'connecting': (1 << _STATE_CONNECTING_),   # attempting to connect to AP
+#'connected': (1 << _STATE_CONNECTED_),     # connected to AP
+#'gettingip': (1 << _STATE_GETTINGIP_),     # getting ip from AP
+#'verifying': (1 << _STATE_VERIFYING_),     # verifying conneciton is valid, no captive portal
+#'operational': (1 << _STATE_OPERATIONAL_)  # ready to use connection
+#}
+
 if __name__ == '__main__':
+    state = _STATE_INVALID_
     mainwin = infowin = None
     err = None
     try:
         mainwin,infowin = setup()
-        infowin.addstr(3,1,"STATE:",curses.color_pair(7))
-        infowin.refresh()
+        updateinfo(infowin,state)
+
         # execution loop
         ch = '!'
         while True:
