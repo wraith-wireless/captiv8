@@ -93,7 +93,7 @@ def banner(win):
     copy = "captiv8 v{0} Copyright {1}".format(captiv8.version,captiv8.__date__)
     win.addstr(i+2,(nc-len(copy))/2,copy,curses.color_pair(BLUE))
 
-def mainmenu(win,now=None):
+def mainmenu(win,state=None):
     """
      writes the main menu (caller will need to refresh)
      :param win: the main window
@@ -114,8 +114,6 @@ def mainmenu(win,now=None):
         else:
             color = curses.color_pair(GRAY)
     win.addstr(start+2,5,text,color)
-
-    win.addstr(start+2,5,"[R|r]un",curses.color_pair(GRAY))
     win.addstr(start+3,5,"[V|v]iew",curses.color_pair(WHITE))
     win.addstr(start+4,5,"[Q|q]uit",curses.color_pair(WHITE))
 
