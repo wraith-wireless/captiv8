@@ -103,7 +103,7 @@ def mainmenu(win,state=None):
     win.addstr(start,3, "MENU: choose one",curses.color_pair(BLUE))
     win.addstr(start+1,5,"[C|c]onfigure",curses.color_pair(WHITE))
     # for the Run option we need to set color and text based on state
-    text = color = None
+    #text = color = None
     if state == _STATE_SCANNING_:
         text = "[P|p]ause"
         color = curses.color_pair(WHITE)
@@ -221,13 +221,13 @@ def configure(conf):
     pass
 
 if __name__ == '__main__':
-    state = _STATE_INVALID_
+    _state_ = _STATE_INVALID_
     mainwin = infowin = None
     err = None
     try:
         # get the windows up
         mainwin,infowin = setup()
-        updateinfo(infowin,state)
+        updateinfo(infowin,_state_)
 
         # create our data dicts
         config = {'SSID':None,'dev':None}
