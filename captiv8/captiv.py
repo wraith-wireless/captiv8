@@ -33,7 +33,11 @@ __email__ = 'wraith.wireless@yandex.com'
 __status__ = 'Development'
 
 import curses
+import pyric
+import pyric.pyw as pyw
 import captiv8
+
+#### CONSTANTS
 
 _BANNER_ = [
 "   ___     _____   _____  _______  _______  _     _   _____",
@@ -44,33 +48,64 @@ _BANNER_ = [
 "  (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)",
 ]
 
+#### STATE DEFINITIONS
+_STATE_INVALID_     = 0
+_STATE_CONFIGURED_  = 1
+_STATE_SCANNING_    = 2
+_STATE_STOPPED_     = 3
+_STATE_CONNECTING_  = 4
+_STATE_CONNECTED_   = 5
+_STATE_GETTINGIP_   = 6
+_STATE_VERIFYING_   = 7
+_STATE_OPERATIONAL_ = 8
+_STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
+                      'connected','gettingip','verifying','operational']
+#_STATE_FLAGS_ = {
+#'invalid': (1 << _STATE_INVALID_),         # not configured
+#'configured': (1 << _STATE_CONFIGURED_),   # configured but not running
+#'scanning': (1 << _STATE_SCANNING_),       # scanning
+#'stopped': (1 << _STATE_STOPPED_),         # not running but has been
+#'connecting': (1 << _STATE_CONNECTING_),   # attempting to connect to AP
+#'connected': (1 << _STATE_CONNECTED_),     # connected to AP
+#'gettingip': (1 << _STATE_GETTINGIP_),     # getting ip from AP
+#'verifying': (1 << _STATE_VERIFYING_),     # verifying conneciton is valid, no captive portal
+#'operational': (1 << _STATE_OPERATIONAL_)  # ready to use connection
+#}
+
+_IPLEN_  = 15
+_MACLEN_ = 17
+_SSIDLEN_ = 32
+
 def setup():
     """
      sets console and main window up
      :returns: the main window object, info window object
     """
     # setup the console
-    main = curses.initscr()            # get a window object
-    curses.noecho()                    # turn off key echoing
-    curses.cbreak()                    # turn off key buffering
-    initcolors()                       # turn on and set color pallet
-    main.keypad(1)                     # let curses handle multibyte special keys
-    main.clear()                       # erase everything
-    banner(main)                       # write the banner
-    mainmenu(main)                     # then the min and menu
+    mmask = curses.ALL_MOUSE_EVENTS      # for now accept all mouse events
+    main = curses.initscr()              # get a window object
+    curses.noecho()                      # turn off key echoing
+    curses.cbreak()                      # turn off key buffering
+    curses.mousemask(mmask)              # accept mouse events
+    initcolors()                         # turn on and set color pallet
+    main.keypad(1)                       # let curses handle multibyte special keys
+    main.clear()                         # erase everything
+    banner(main)                         # write the banner
+    mainmenu(main)                       # then the min and menu
     main.attron(curses.color_pair(RED))  # make the border red
-    main.border(0)                     # place the border
+    main.border(0)                       # place the border
     main.attroff(curses.color_pair(RED)) # turn off the red
-    info = infowindow(main)            # create the info panel/window
-    curses.curs_set(0)                 # hide the cursor
-    main.refresh()                     # and show everything
+    info = infowindow(main)              # create the info panel/window
+    curses.curs_set(0)                   # hide the cursor
+    main.refresh()                       # and show everything
     return main,info
 
-BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY = range(9)
+BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
 def initcolors():
     """ initialize color pallet """
     curses.start_color()
     for i in range(1,9): curses.init_pair(i,i,BLACK)
+    curses.init_pair(BUTTON,WHITE,GRAY) # white on gray for buttons
 
 def banner(win):
     """
@@ -132,9 +167,6 @@ def infowindow(win):
     info.refresh()
     return info
 
-_IPLEN_  = 15
-_MACLEN_ = 17
-_SSIDLEN_ = 32
 def updateinfo(win,state):
     """
      writes current state to info window
@@ -186,39 +218,111 @@ def teardown(win):
     curses.echo()
     curses.endwin()
 
-#### STATE DEFINITIONS
-_STATE_INVALID_     = 0
-_STATE_CONFIGURED_  = 1
-_STATE_SCANNING_    = 2
-_STATE_STOPPED_     = 3
-_STATE_CONNECTING_  = 4
-_STATE_CONNECTED_   = 5
-_STATE_GETTINGIP_   = 6
-_STATE_VERIFYING_   = 7
-_STATE_OPERATIONAL_ = 8
-_STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
-                      'connected','gettingip','verifying','operational']
-#_STATE_FLAGS_ = {
-#'invalid': (1 << _STATE_INVALID_),         # not configured
-#'configured': (1 << _STATE_CONFIGURED_),   # configured but not running
-#'scanning': (1 << _STATE_SCANNING_),       # scanning
-#'stopped': (1 << _STATE_STOPPED_),         # not running but has been
-#'connecting': (1 << _STATE_CONNECTING_),   # attempting to connect to AP
-#'connected': (1 << _STATE_CONNECTED_),     # connected to AP
-#'gettingip': (1 << _STATE_GETTINGIP_),     # getting ip from AP
-#'verifying': (1 << _STATE_VERIFYING_),     # verifying conneciton is valid, no captive portal
-#'operational': (1 << _STATE_OPERATIONAL_)  # ready to use connection
-#}
-
 #### MENU OPTION CALLBACKS
 
-def configure(conf):
+def configure(win,conf):
     """
      shows options to configure captiv8 for running
+     :param win: the main window
      :param conf: current state of configuration dict
      NOTE: configure will modify conf in-place as necessary
     """
-    pass
+    # create an inputs dict to hold the begin locations of inputs
+    ins = {} # input -> (start_y,start_x),length)
+
+    # create new window (new window will cover the main window)
+    nr,nc = win.getmaxyx() # size of the main window
+    ny,nx = 15,50
+    zy,zx = (nr-ny)/2,(nc-nx)/2
+    confwin = curses.newwin(ny,nx,zy,zx)
+
+    # draw a blue border
+    confwin.attron(curses.color_pair(BLUE))
+    confwin.border(0)
+    confwin.attron(curses.color_pair(BLUE))
+
+    # add title and options
+    confwin.addstr(1,1,"Configure Options",curses.color_pair(BLUE))
+    confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,curses.color_pair(WHITE))
+    #ins['SSID'] = ((2+zy,len("SSID: ")+zx+1),(2+zy,_SSIDLEN_+zx))
+    ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_)
+
+    # allow for up to 6 devices to choose in rows of 2 x 3
+    confwin.addstr(3,1,"Select dev:",curses.color_pair(WHITE)) # the sub title
+    i = 4 # current row
+    j = 1 # current dev
+    devs = pyw.winterfaces()[:8]
+    for dev in devs:
+        stds = ""
+        monitor = True
+        nl80211 = True
+        try:
+            card = pyw.getcard(dev)
+            stds = pyw.devstds(card)
+            monitor = 'monitor' in pyw.devmodes(card)
+        except pyric.error:
+            # assume just related to current dev
+            nl80211 = False
+        devopt = "{0}. (_) {1}".format(j,dev)
+        if stds: devopt += " IEEE 802.11{0}".format(''.join(stds))
+        if monitor and nl80211:
+            confwin.addstr(i,2,devopt,curses.color_pair(WHITE))
+        else:
+            # make it gray
+            # TODO: strikethrough, tried with '-' but it overwrites
+            errmsg = ""
+            if not monitor: errmsg = "No monitor mode"
+            elif not nl80211: errmsg = "No nl80211"
+            confwin.addstr(i,2,devopt,curses.color_pair(GRAY))
+            confwin.addstr(i,3,'X',curses.color_pair(GRAY))
+            #confwin.addstr(i,6,'-'*len(dev),curses.color_pair(GRAY)) # 2 + len of (_)
+            confwin.addstr(i,len(devopt)+3,errmsg,curses.color_pair(GRAY))
+        i += 1
+        j += 1
+
+    # add connect option
+    confwin.addstr(i,1,"Connect: (_) auto (_) manual",curses.color_pair(WHITE))
+
+    # we want two buttons Set and Cancel. Make these buttons centered. Underline
+    # the first character
+    btn1 = "Set"
+    btn2 = "Cancel"
+    btnlen = len(btn1) + len(btn2) + 1 # add a space
+    btncen = (nx-btnlen) / 2            # center point for both
+    # btn 1 -> underline first character
+    confwin.addstr(ny-2,btncen-(len(btn1)-1),btn1[0],curses.color_pair(BUTTON)|
+                                                     curses.A_UNDERLINE)
+    confwin.addstr(ny-2,btncen-(len(btn1)-1)+1,btn1[1:],curses.color_pair(BUTTON))
+    # btn 2 -> underline first character
+    confwin.addstr(ny-2,btncen+2,btn2[0],curses.color_pair(BUTTON)|
+                                         curses.A_UNDERLINE)
+    confwin.addstr(ny-2,btncen+3,btn2[1:],curses.color_pair(BUTTON))
+    confwin.refresh()
+
+    # capture the focus and run our execution loop
+
+    # configure window execution loop
+    while True:
+        ev = mainwin.getch()
+        if ev == curses.KEY_MOUSE:
+            # handle mouse, determine if we should check/uncheck etc
+            _,mx,my,_,b = curses.getmouse()
+            if b == curses.BUTTON1_CLICKED:
+
+                if my == ins['SSID'][0]:
+                    if ins['SSID'][1] <= mx <= ins['SSID'][1]+ins['SSID'][2]:
+                        curses.setsyx(ins['SSID'][0],ins['SSID'][1])
+                        curses.doupdate()
+                        curses.curs_set(1)
+                        curses.echo()
+        else:
+            try:
+                ch = chr(ev).upper()
+            except ValueError:
+                continue
+            if ch == 'S': break
+            elif ch == 'C': break
+    del confwin
 
 if __name__ == '__main__':
     _state_ = _STATE_INVALID_
@@ -230,17 +334,25 @@ if __name__ == '__main__':
         updateinfo(infowin,_state_)
 
         # create our data dicts
-        config = {'SSID':None,'dev':None}
+        config = {'SSID':None,'dev':None,'connect':None}
 
         # execution loop
-        ch = '!'
         while True:
-            if ch == ord('!'): continue
-            elif ch == ord('Q') or ch == ord('q'): break
-            elif ch == ord('C') or ch == ord('c'): pass
-            elif ch == ord('R') or ch == ord('r'): pass
-            elif ch == ord('V') or ch == ord('v'): pass
-            ch = mainwin.getch()
+            ev = mainwin.getch()
+            if ev == curses.KEY_MOUSE: pass
+            else:
+                try:
+                    ch = chr(ev).upper()
+                except ValueError:
+                    # handle out of range errors from chr
+                    continue
+                if ch == 'C':
+                    configure(mainwin,config)
+                    mainwin.touchwin()
+                    mainwin.refresh()
+                elif ch == 'R': pass
+                elif ch == 'V': pass
+                elif ch == 'Q': break
     except KeyboardInterrupt: pass
     except curses.error as e: err = e
     finally:
