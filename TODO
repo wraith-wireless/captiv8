@@ -1,1 +1,16 @@
-1. when using start_color, I want to keep the current background of the console
+2. Flash (and beep) does not work
+ o could we reverse highlight the ssid instead?
+3. add arrow key (left, right) support to configure->SSID
+4. In configure, would like to strikethrough dev name if it cannot be used
+ tried overwriting with '-' but the background covers it up
+5. figure out to write a box (ascii 254) instead of a 'Y' when selecting an option
+6. configure is a hodgepodge of coordinate systems, relative and absolute but
+ it seems to be the only way to get it to work
+7. have set the execution loop in configure to catch cursess errors on curses.getmouse
+ due to occasional "getmouse() returned err". don't know what this is from.
+ For now, I catch and continue but this may end up be some unrecoverable error
+ and this solution will cause the app to hang.
+8. in configure do we leave the return as is on Set?
+  o this could be used to delete/reset config
+  o but is user friendly?
+9. checking x length on radio options is pointless

@@ -33,12 +33,14 @@ __email__ = 'wraith.wireless@yandex.com'
 __status__ = 'Development'
 
 import curses
+import curses.ascii as ascii
 import pyric
 import pyric.pyw as pyw
 import captiv8
 
 #### CONSTANTS
 
+# MAIN WINDOW BANNER
 _BANNER_ = [
 "   ___     _____   _____  _______  _______  _     _   _____",
 " _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)",
@@ -48,7 +50,7 @@ _BANNER_ = [
 "  (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)",
 ]
 
-#### STATE DEFINITIONS
+# PROGRAM STATE DEFINITIONS
 _STATE_INVALID_     = 0
 _STATE_CONFIGURED_  = 1
 _STATE_SCANNING_    = 2
@@ -60,21 +62,14 @@ _STATE_VERIFYING_   = 7
 _STATE_OPERATIONAL_ = 8
 _STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
                       'connected','gettingip','verifying','operational']
-#_STATE_FLAGS_ = {
-#'invalid': (1 << _STATE_INVALID_),         # not configured
-#'configured': (1 << _STATE_CONFIGURED_),   # configured but not running
-#'scanning': (1 << _STATE_SCANNING_),       # scanning
-#'stopped': (1 << _STATE_STOPPED_),         # not running but has been
-#'connecting': (1 << _STATE_CONNECTING_),   # attempting to connect to AP
-#'connected': (1 << _STATE_CONNECTED_),     # connected to AP
-#'gettingip': (1 << _STATE_GETTINGIP_),     # getting ip from AP
-#'verifying': (1 << _STATE_VERIFYING_),     # verifying conneciton is valid, no captive portal
-#'operational': (1 << _STATE_OPERATIONAL_)  # ready to use connection
-#}
 
+# FIXED LENGTHS
 _IPLEN_  = 15
 _MACLEN_ = 17
 _SSIDLEN_ = 32
+
+# COLORS
+BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
 
 def setup():
     """
@@ -100,7 +95,6 @@ def setup():
     main.refresh()                       # and show everything
     return main,info
 
-BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
 def initcolors():
     """ initialize color pallet """
     curses.start_color()
@@ -120,13 +114,12 @@ def banner(win):
     c = (nc-c)/2
 
     # add each line in the banner
-    i = 0 # appease pycharm
     for i,line in enumerate(_BANNER_):
         win.addstr(i+1,c,line,curses.color_pair(WHITE))
 
     # put the copyright in the middle
     copy = "captiv8 v{0} Copyright {1}".format(captiv8.version,captiv8.__date__)
-    win.addstr(i+2,(nc-len(copy))/2,copy,curses.color_pair(BLUE))
+    win.addstr(len(_BANNER_)+1,(nc-len(copy))/2,copy,curses.color_pair(BLUE))
 
 def mainmenu(win,state=None):
     """
@@ -137,8 +130,8 @@ def mainmenu(win,state=None):
     start = len(_BANNER_)+3
     win.addstr(start,3, "MENU: choose one",curses.color_pair(BLUE))
     win.addstr(start+1,5,"[C|c]onfigure",curses.color_pair(WHITE))
+
     # for the Run option we need to set color and text based on state
-    #text = color = None
     if state == _STATE_SCANNING_:
         text = "[P|p]ause"
         color = curses.color_pair(WHITE)
@@ -247,7 +240,7 @@ def configure(win,conf):
     # add title and options
     confwin.addstr(1,1,"Configure Options",curses.color_pair(BLUE))
     confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,curses.color_pair(WHITE))
-    ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_)
+    ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_-1)
 
     # allow for up to 6 devices to choose in rows of 2 x 3
     confwin.addstr(3,1,"Select dev:",curses.color_pair(WHITE)) # the sub title
@@ -269,10 +262,9 @@ def configure(win,conf):
         if stds: devopt += " IEEE 802.11{0}".format(''.join(stds))
         if monitor and nl80211:
             confwin.addstr(i,2,devopt,curses.color_pair(WHITE))
-
+            ins[j] = (i+zy,len("n. (")+zx+2,0)
         else:
             # make it gray
-            # TODO: strikethrough, tried with '-' but it overwrites
             errmsg = ""
             if not monitor: errmsg = "No monitor mode"
             elif not nl80211: errmsg = "No nl80211"
@@ -284,45 +276,96 @@ def configure(win,conf):
 
     # add connect option
     confwin.addstr(i,1,"Connect: (_) auto (_) manual",curses.color_pair(WHITE))
-    ins['auto'] = (i+zy,len("Connect: (")+zx+1,1)
-    ins['manual'] = (i+zy,len("Connect: (_) auto (")+zx+1,1)
+    ins['auto'] = (i+zy,len("Connect: (")+zx+1,0)
+    ins['manual'] = (i+zy,len("Connect: (_) auto (")+zx+1,0)
+    if conf['connect']:
+        if conf['connect'] == 'auto':
+            confwin.addstr(ins['auto'][0]-zy,
+                           ins['auto'][1]-zx,
+                           'Y',curses.color_pair(GREEN))
+        elif conf['connect'] == 'manual':
+            confwin.addstr(ins['manual'][0]-zy,
+                           ins['manual'][1]-zx,
+                           'Y',curses.color_pair(GREEN))
 
     # we want two buttons Set and Cancel. Make these buttons centered. Underline
     # the first character
     btn1 = "Set"
     btn2 = "Cancel"
-    btnlen = len(btn1) + len(btn2) + 1 # add a space
+    btnlen = len(btn1) + len(btn2) + 1  # add a space
     btncen = (nx-btnlen) / 2            # center point for both
     # btn 1 -> underline first character
-    confwin.addstr(ny-2,btncen-(len(btn1)-1),btn1[0],curses.color_pair(BUTTON)|
-                                                     curses.A_UNDERLINE)
-    confwin.addstr(ny-2,btncen-(len(btn1)-1)+1,btn1[1:],curses.color_pair(BUTTON))
+    y,x = ny-2,btncen-(len(btn1)-1)
+    confwin.addstr(y,x,btn1[0],curses.color_pair(BUTTON)|curses.A_UNDERLINE)
+    confwin.addstr(y,x+1,btn1[1:],curses.color_pair(BUTTON))
+    ins['set'] = (y+zy,x+zx,len(btn1)-1)
     # btn 2 -> underline first character
-    confwin.addstr(ny-2,btncen+2,btn2[0],curses.color_pair(BUTTON)|
-                                         curses.A_UNDERLINE)
-    confwin.addstr(ny-2,btncen+3,btn2[1:],curses.color_pair(BUTTON))
+    y,x = ny-2,btncen+2
+    confwin.addstr(y,x,btn2[0],curses.color_pair(BUTTON)|curses.A_UNDERLINE)
+    confwin.addstr(y,x+1,btn2[1:],curses.color_pair(BUTTON))
+    ins['cancel'] = (y+zy,x+zx,len(btn2)-1)
     confwin.refresh()
 
     # capture the focus and run our execution loop
-    # TODO:
-    #  1) confwin.getch does not work have to use mainwin.getch why?
-    #  2) figure out to write a box (ascii 254) instead of a 'Y'
     confwin.keypad(1) # enable IOT read mouse events
     store = False
     while True:
         ev = confwin.getch()
         if ev == curses.KEY_MOUSE:
             # handle mouse, determine if we should check/uncheck etc
-            # get the coords and translate to confwin coord
-            _,mx,my,_,b = curses.getmouse()
+            try:
+                _,mx,my,_,b = curses.getmouse()
+            except curses.error:
+                continue
+
             if b == curses.BUTTON1_CLICKED:
                 # determine if we're inside a option area
-                if my == ins['SSID'][0]:
+                if my == ins['set'][0]:
+                    if ins['set'][1] <= mx <= ins['set'][1]+ins['set'][2]:
+                        store = True
+                        break
+                    elif ins['cancel'][1] <= mx <= ins['cancel'][1]+ins['cancel'][2]:
+                        break
+                elif my == ins['SSID'][0]:
                     if ins['SSID'][1] <= mx <= ins['SSID'][1]+ins['SSID'][2]:
-                        curses.setsyx(ins['SSID'][0],ins['SSID'][1])
-                        curses.doupdate()
+                        # move the cursor to the first entry char & turn on
+                        curs = ins['SSID'][0],ins['SSID'][1]
+                        confwin.move(curs[0]-zy,curs[1]-zx)
                         curses.curs_set(1)
-                        #curses.echo()
+
+                        # loop until we get <ENTER>
+                        while True:
+                            # get the next char
+                            ev = confwin.getch()
+                            if ev == ascii.NL or ev == curses.KEY_ENTER: break
+                            elif ev == ascii.BS or ev == curses.KEY_BACKSPACE:
+                                if curs[1] == ins['SSID'][1]: continue
+                                # delete (write over with '-') prev char, then move back
+                                curs = curs[0],curs[1]-1
+                                confwin.addch(curs[0]-zy,
+                                               curs[1]-zx,
+                                               '_',
+                                               curses.color_pair(WHITE))
+                                confwin.move(curs[0]-zy,curs[1]-zx)
+                            else:
+                                if curs[1] > ins['SSID'][1] + ins['SSID'][2]:
+                                    curses.flash()
+                                    continue
+
+                                # add the character, (cursor moves on its own)
+                                # update our pointer for the next entry
+                                try:
+                                    confwin.addstr(curs[0]-zy,
+                                                   curs[1]-zx,
+                                                   chr(ev),
+                                                   curses.color_pair(GREEN))
+                                    curs = curs[0],curs[1]+1
+                                except ValueError:
+                                    # put this back on and see if the outer
+                                    # loop can do something with it
+                                    curses.ungetch(ev)
+                                    break
+                        curses.curs_set(0) # turn of the cursor
                 elif my == ins['auto'][0]:
                     if ins['auto'][1] <= mx <= ins['auto'][1]+ins['auto'][2]:
                         if newconf['connect'] == 'manual':
@@ -342,6 +385,12 @@ def configure(win,conf):
                         newconf['connect'] = 'manual'
                         confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
                         confwin.refresh()
+                else:
+                    # check for each listed device
+                    for d in range(j-1):
+                        if my == ins[d+1][0] and ins[d+1][1] <= mx <= ins[d+1][1]+ins[d+1][2]:
+                            confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                            confwin.refresh()
         else:
             try:
                 ch = chr(ev).upper()
@@ -351,7 +400,14 @@ def configure(win,conf):
                 store = True
                 break
             elif ch == 'C': break
-    del confwin
+
+    # only 'radio buttons' are kept, check if a SSID was entered and add if so
+    if store:
+        ssid = confwin.instr(ins['SSID'][0]-zy,ins['SSID'][1]-zx,_SSIDLEN_).strip('_')
+        if ssid: newconf['SSID'] = ssid
+
+    # delete this window and return
+    del confwin  # remove the window
     return newconf if store else None
 
 if __name__ == '__main__':
