@@ -225,10 +225,13 @@ def configure(win,conf):
      shows options to configure captiv8 for running
      :param win: the main window
      :param conf: current state of configuration dict
-     NOTE: configure will modify conf in-place as necessary
     """
     # create an inputs dict to hold the begin locations of inputs
     ins = {} # input -> (start_y,start_x),length)
+
+    # create a copy of conf to manipulate
+    newconf = {}
+    for key in conf: newconf[key] = conf[key]
 
     # create new window (new window will cover the main window)
     nr,nc = win.getmaxyx() # size of the main window
@@ -244,7 +247,6 @@ def configure(win,conf):
     # add title and options
     confwin.addstr(1,1,"Configure Options",curses.color_pair(BLUE))
     confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,curses.color_pair(WHITE))
-    #ins['SSID'] = ((2+zy,len("SSID: ")+zx+1),(2+zy,_SSIDLEN_+zx))
     ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_)
 
     # allow for up to 6 devices to choose in rows of 2 x 3
@@ -267,6 +269,7 @@ def configure(win,conf):
         if stds: devopt += " IEEE 802.11{0}".format(''.join(stds))
         if monitor and nl80211:
             confwin.addstr(i,2,devopt,curses.color_pair(WHITE))
+
         else:
             # make it gray
             # TODO: strikethrough, tried with '-' but it overwrites
@@ -275,13 +278,14 @@ def configure(win,conf):
             elif not nl80211: errmsg = "No nl80211"
             confwin.addstr(i,2,devopt,curses.color_pair(GRAY))
             confwin.addstr(i,3,'X',curses.color_pair(GRAY))
-            #confwin.addstr(i,6,'-'*len(dev),curses.color_pair(GRAY)) # 2 + len of (_)
             confwin.addstr(i,len(devopt)+3,errmsg,curses.color_pair(GRAY))
         i += 1
         j += 1
 
     # add connect option
     confwin.addstr(i,1,"Connect: (_) auto (_) manual",curses.color_pair(WHITE))
+    ins['auto'] = (i+zy,len("Connect: (")+zx+1,1)
+    ins['manual'] = (i+zy,len("Connect: (_) auto (")+zx+1,1)
 
     # we want two buttons Set and Cancel. Make these buttons centered. Underline
     # the first character
@@ -300,29 +304,55 @@ def configure(win,conf):
     confwin.refresh()
 
     # capture the focus and run our execution loop
-
-    # configure window execution loop
+    # TODO:
+    #  1) confwin.getch does not work have to use mainwin.getch why?
+    #  2) figure out to write a box (ascii 254) instead of a 'Y'
+    confwin.keypad(1) # enable IOT read mouse events
+    store = False
     while True:
-        ev = mainwin.getch()
+        ev = confwin.getch()
         if ev == curses.KEY_MOUSE:
             # handle mouse, determine if we should check/uncheck etc
+            # get the coords and translate to confwin coord
             _,mx,my,_,b = curses.getmouse()
             if b == curses.BUTTON1_CLICKED:
-
+                # determine if we're inside a option area
                 if my == ins['SSID'][0]:
                     if ins['SSID'][1] <= mx <= ins['SSID'][1]+ins['SSID'][2]:
                         curses.setsyx(ins['SSID'][0],ins['SSID'][1])
                         curses.doupdate()
                         curses.curs_set(1)
-                        curses.echo()
+                        #curses.echo()
+                elif my == ins['auto'][0]:
+                    if ins['auto'][1] <= mx <= ins['auto'][1]+ins['auto'][2]:
+                        if newconf['connect'] == 'manual':
+                            # turn off manual
+                            confwin.addstr(ins['manual'][0]-zy,
+                                           ins['manual'][1]-zx,
+                                           '_',curses.color_pair(WHITE))
+                        newconf['connect'] = 'auto'
+                        confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                        confwin.refresh()
+                    elif ins['manual'][1] <= mx <= ins['manual'][1]+ins['manual'][2]:
+                        if newconf['connect'] == 'auto':
+                            # turn off auto
+                            confwin.addstr(ins['auto'][0]-zy,
+                                           ins['auto'][1]-zx,
+                                           '_',curses.color_pair(WHITE))
+                        newconf['connect'] = 'manual'
+                        confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                        confwin.refresh()
         else:
             try:
                 ch = chr(ev).upper()
             except ValueError:
                 continue
-            if ch == 'S': break
+            if ch == 'S':
+                store = True
+                break
             elif ch == 'C': break
     del confwin
+    return newconf if store else None
 
 if __name__ == '__main__':
     _state_ = _STATE_INVALID_
@@ -347,9 +377,10 @@ if __name__ == '__main__':
                     # handle out of range errors from chr
                     continue
                 if ch == 'C':
-                    configure(mainwin,config)
+                    newconfig = configure(mainwin,config)
                     mainwin.touchwin()
                     mainwin.refresh()
+                    if newconfig: config = newconfig
                 elif ch == 'R': pass
                 elif ch == 'V': pass
                 elif ch == 'Q': break
