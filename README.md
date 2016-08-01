@@ -2,7 +2,7 @@
 
 [![License: GPLv3](https://img.shields.io/pypi/l/captiv8.svg)](https://github.com/wraith-wireless/captiv8/blob/master/LICENSE)
 [![PyPI Version](https://img.shields.io/pypi/v/captiv8.svg)](https://pypi.python.org/pypi/captiv8)
-[comment]: <> [![Downloads per month on PyPI](https://img.shields.io/pypi/dm/captiv8.svg)](https://pypi.python.org/pypi/captiv8)
+<!--//[![Downloads per month on PyPI](https://img.shields.io/pypi/dm/captiv8.svg)](https://pypi.python.org/pypi/captiv8)\\-->
 ![Supported Python Versions](https://img.shields.io/pypi/pyversions/captiv8.svg)
 ![Software status](https://img.shields.io/pypi/status/captiv8.svg)
 
