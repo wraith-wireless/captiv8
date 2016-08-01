@@ -68,8 +68,9 @@ _IPLEN_  = 15
 _MACLEN_ = 17
 _SSIDLEN_ = 32
 
-# COLORS
+# COLORS & COLOR PAIRS
 BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
+CPS = [None] * 10
 
 def setup():
     """
@@ -77,29 +78,32 @@ def setup():
      :returns: the main window object, info window object
     """
     # setup the console
-    mmask = curses.ALL_MOUSE_EVENTS      # for now accept all mouse events
-    main = curses.initscr()              # get a window object
-    curses.noecho()                      # turn off key echoing
-    curses.cbreak()                      # turn off key buffering
-    curses.mousemask(mmask)              # accept mouse events
-    initcolors()                         # turn on and set color pallet
-    main.keypad(1)                       # let curses handle multibyte special keys
-    main.clear()                         # erase everything
-    banner(main)                         # write the banner
-    mainmenu(main)                       # then the min and menu
-    main.attron(curses.color_pair(RED))  # make the border red
-    main.border(0)                       # place the border
-    main.attroff(curses.color_pair(RED)) # turn off the red
-    info = infowindow(main)              # create the info panel/window
-    curses.curs_set(0)                   # hide the cursor
-    main.refresh()                       # and show everything
+    mmask = curses.ALL_MOUSE_EVENTS # for now accept all mouse events
+    main = curses.initscr()         # get a window object
+    curses.noecho()                 # turn off key echoing
+    curses.cbreak()                 # turn off key buffering
+    curses.mousemask(mmask)         # accept mouse events
+    initcolors()                    # turn on and set color pallet
+    main.keypad(1)                  # let curses handle multibyte special keys
+    main.clear()                    # erase everything
+    banner(main)                    # write the banner
+    mainmenu(main)                  # then the min and menu
+    main.attron(CPS[RED])           # make the border red
+    main.border(0)                  # place the border
+    main.attroff(CPS[RED])          # turn off the red
+    info = infowindow(main)         # create the info panel/window
+    curses.curs_set(0)              # hide the cursor
+    main.refresh()                  # and show everything
     return main,info
 
 def initcolors():
     """ initialize color pallet """
     curses.start_color()
-    for i in range(1,9): curses.init_pair(i,i,BLACK)
+    for i in range(1,9):
+        curses.init_pair(i,i,BLACK)
+        CPS[i] = curses.color_pair(i)
     curses.init_pair(BUTTON,WHITE,GRAY) # white on gray for buttons
+    CPS[BUTTON] = curses.color_pair(BUTTON)
 
 def banner(win):
     """
@@ -115,11 +119,11 @@ def banner(win):
 
     # add each line in the banner
     for i,line in enumerate(_BANNER_):
-        win.addstr(i+1,c,line,curses.color_pair(WHITE))
+        win.addstr(i+1,c,line,CPS[WHITE])
 
     # put the copyright in the middle
     copy = "captiv8 v{0} Copyright {1}".format(captiv8.version,captiv8.__date__)
-    win.addstr(len(_BANNER_)+1,(nc-len(copy))/2,copy,curses.color_pair(BLUE))
+    win.addstr(len(_BANNER_)+1,(nc-len(copy))/2,copy,CPS[BLUE])
 
 def mainmenu(win,state=None):
     """
@@ -128,22 +132,22 @@ def mainmenu(win,state=None):
      :param state: current state, None = invalid
     """
     start = len(_BANNER_)+3
-    win.addstr(start,3, "MENU: choose one",curses.color_pair(BLUE))
-    win.addstr(start+1,5,"[C|c]onfigure",curses.color_pair(WHITE))
+    win.addstr(start,3, "MENU: choose one",CPS[BLUE])
+    win.addstr(start+1,5,"[C|c]onfigure",CPS[WHITE])
 
     # for the Run option we need to set color and text based on state
     if state == _STATE_SCANNING_:
         text = "[P|p]ause"
-        color = curses.color_pair(WHITE)
+        color = CPS[WHITE]
     else:
         text = "[R|r]un"
         if state == _STATE_CONFIGURED_ or state == _STATE_STOPPED_:
-            color = curses.color_pair(WHITE)
+            color = CPS[WHITE]
         else:
-            color = curses.color_pair(GRAY)
+            color = CPS[GRAY]
     win.addstr(start+2,5,text,color)
-    win.addstr(start+3,5,"[V|v]iew",curses.color_pair(WHITE))
-    win.addstr(start+4,5,"[Q|q]uit",curses.color_pair(WHITE))
+    win.addstr(start+3,5,"[V|v]iew",CPS[WHITE])
+    win.addstr(start+4,5,"[Q|q]uit",CPS[WHITE])
 
 def infowindow(win):
     """
@@ -154,9 +158,9 @@ def infowindow(win):
     # try adding a subwindow for info 4 x n
     nr,nc = win.getmaxyx()
     info = win.derwin(6,nc-4,nr-7,2)
-    info.attron(curses.color_pair(BLUE))
+    info.attron(CPS[BLUE])
     info.border(0)
-    info.attron(curses.color_pair(BLUE))
+    info.attron(CPS[BLUE])
     info.refresh()
     return info
 
@@ -169,34 +173,34 @@ def updateinfo(win,state):
     # line 1, contains the SSID and BSSID entries
     # line 2, contains the MAC and ip entries
     nr,nc = win.getmaxyx()
-    win.addstr(1,1,"SSID:",curses.color_pair(WHITE))
-    win.addstr(1,nc-25,"BSSID:",curses.color_pair(WHITE)) # mac is 17 chars
-    win.addstr(2,1,"MAC:",curses.color_pair(WHITE))
-    win.addstr(2,nc-22,"IP:",curses.color_pair(WHITE))
+    win.addstr(1,1,"SSID:",CPS[WHITE])
+    win.addstr(1,nc-25,"BSSID:",CPS[WHITE]) # mac is 17 chars
+    win.addstr(2,1,"MAC:",CPS[WHITE])
+    win.addstr(2,nc-22,"IP:",CPS[WHITE])
 
     # add empty lines
-    win.addstr(1,7,'-'*_SSIDLEN_,curses.color_pair(WHITE))
-    win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,curses.color_pair(WHITE))
-    win.addstr(2,7,'-'*_MACLEN_,curses.color_pair(WHITE))
-    win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,curses.color_pair(WHITE))
+    win.addstr(1,7,'-'*_SSIDLEN_,CPS[WHITE])
+    win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
+    win.addstr(2,7,'-'*_MACLEN_,CPS[WHITE])
+    win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
 
-    color = curses.color_pair(RED)
+    color = CPS[RED]
     symbol = '?'
     if state == _STATE_INVALID_: pass
     elif state == _STATE_CONFIGURED_:
-        color = curses.color_pair(RED)
+        color = CPS[RED]
         symbol = '-'
     elif state == _STATE_OPERATIONAL_:
-        color = curses.color_pair(2)
+        color = CPS[GREEN]
         symbol = '+'
     else:
-        if state == _STATE_STOPPED_: color = curses.color_pair(RED)
-        else: color = curses.color_pair(YELLOW)
+        if state == _STATE_STOPPED_: color = CPS[RED]
+        else: color = CPS[YELLOW]
         symbol = '/'
-    win.addstr(4,1,'[',curses.color_pair(WHITE))
+    win.addstr(4,1,'[',CPS[WHITE])
     win.addstr(4,2,symbol,color)
-    win.addstr(4,3,']',curses.color_pair(WHITE))
-    win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),curses.color_pair(WHITE))
+    win.addstr(4,3,']',CPS[WHITE])
+    win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),CPS[WHITE])
     win.refresh()
 
 
@@ -219,6 +223,10 @@ def configure(win,conf):
      :param win: the main window
      :param conf: current state of configuration dict
     """
+    # create our on/off for radio buttons
+    BON = curses.ACS_DIAMOND
+    BOFF = '_'
+
     # create an inputs dict to hold the begin locations of inputs
     ins = {} # input -> (start_y,start_x),length)
 
@@ -227,25 +235,29 @@ def configure(win,conf):
     for key in conf: newconf[key] = conf[key]
 
     # create new window (new window will cover the main window)
-    nr,nc = win.getmaxyx() # size of the main window
-    ny,nx = 15,50
-    zy,zx = (nr-ny)/2,(nc-nx)/2
+    # get sizes for coord translation
+    nr,nc = win.getmaxyx()               # size of the main window
+    ny,nx = 15,50                        # size of new window
+    zy,zx = (nr-ny)/2,(nc-nx)/2          # 0,0 (top left corner) of new window
     confwin = curses.newwin(ny,nx,zy,zx)
 
-    # draw a blue border
-    confwin.attron(curses.color_pair(BLUE))
+    # draw a blue border and write title
+    confwin.attron(CPS[BLUE])
     confwin.border(0)
-    confwin.attron(curses.color_pair(BLUE))
+    confwin.attron(CPS[BLUE])
+    confwin.addstr(1,1,"Configure Options",CPS[BLUE])
 
-    # add title and options
-    confwin.addstr(1,1,"Configure Options",curses.color_pair(BLUE))
-    confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,curses.color_pair(WHITE))
+    # ssid option, add if present
+    confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,CPS[WHITE])
     ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_-1)
+    if newconf['SSID']:
+        for i,s in enumerate(newconf['SSID']):
+            confwin.addch(ins['SSID'][0]-zy,ins['SSID'][1]-zx+i,s,CPS[GREEN])
 
     # allow for up to 6 devices to choose in rows of 2 x 3
-    confwin.addstr(3,1,"Select dev:",curses.color_pair(WHITE)) # the sub title
+    confwin.addstr(3,1,"Select dev:",CPS[WHITE]) # the sub title
     i = 4 # current row
-    j = 1 # current dev
+    j = 0 # current dev
     devs = pyw.winterfaces()[:8]
     for dev in devs:
         stds = ""
@@ -258,35 +270,31 @@ def configure(win,conf):
         except pyric.error:
             # assume just related to current dev
             nl80211 = False
-        devopt = "{0}. (_) {1}".format(j,dev)
+        devopt = "{0}. (_) {1}".format(j+1,dev)
         if stds: devopt += " IEEE 802.11{0}".format(''.join(stds))
         if monitor and nl80211:
-            confwin.addstr(i,2,devopt,curses.color_pair(WHITE))
+            confwin.addstr(i,2,devopt,CPS[WHITE])
             ins[j] = (i+zy,len("n. (")+zx+2,0)
+            if newconf['dev'] == dev:
+                confwin.addch(ins[j][0]-zy,ins[j][1]-zx,BON,CPS[GREEN])
         else:
             # make it gray
             errmsg = ""
             if not monitor: errmsg = "No monitor mode"
             elif not nl80211: errmsg = "No nl80211"
-            confwin.addstr(i,2,devopt,curses.color_pair(GRAY))
-            confwin.addstr(i,3,'X',curses.color_pair(GRAY))
-            confwin.addstr(i,len(devopt)+3,errmsg,curses.color_pair(GRAY))
+            confwin.addstr(i,2,devopt,CPS[GRAY])
+            confwin.addstr(i,3,'X',CPS[GRAY])
+            confwin.addstr(i,len(devopt)+3,errmsg,CPS[GRAY])
         i += 1
         j += 1
 
-    # add connect option
-    confwin.addstr(i,1,"Connect: (_) auto (_) manual",curses.color_pair(WHITE))
+    # connect option, select current if present
+    confwin.addstr(i,1,"Connect: (_) auto (_) manual",CPS[WHITE])
     ins['auto'] = (i+zy,len("Connect: (")+zx+1,0)
     ins['manual'] = (i+zy,len("Connect: (_) auto (")+zx+1,0)
-    if conf['connect']:
-        if conf['connect'] == 'auto':
-            confwin.addstr(ins['auto'][0]-zy,
-                           ins['auto'][1]-zx,
-                           'Y',curses.color_pair(GREEN))
-        elif conf['connect'] == 'manual':
-            confwin.addstr(ins['manual'][0]-zy,
-                           ins['manual'][1]-zx,
-                           'Y',curses.color_pair(GREEN))
+    if newconf['connect']:
+        confwin.addch(ins[newconf['connect']][0]-zy,ins[newconf['connect']][1]-zx,
+                      BON,CPS[GREEN])
 
     # we want two buttons Set and Cancel. Make these buttons centered. Underline
     # the first character
@@ -296,13 +304,13 @@ def configure(win,conf):
     btncen = (nx-btnlen) / 2            # center point for both
     # btn 1 -> underline first character
     y,x = ny-2,btncen-(len(btn1)-1)
-    confwin.addstr(y,x,btn1[0],curses.color_pair(BUTTON)|curses.A_UNDERLINE)
-    confwin.addstr(y,x+1,btn1[1:],curses.color_pair(BUTTON))
+    confwin.addstr(y,x,btn1[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    confwin.addstr(y,x+1,btn1[1:],CPS[BUTTON])
     ins['set'] = (y+zy,x+zx,len(btn1)-1)
     # btn 2 -> underline first character
     y,x = ny-2,btncen+2
-    confwin.addstr(y,x,btn2[0],curses.color_pair(BUTTON)|curses.A_UNDERLINE)
-    confwin.addstr(y,x+1,btn2[1:],curses.color_pair(BUTTON))
+    confwin.addstr(y,x,btn2[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    confwin.addstr(y,x+1,btn2[1:],CPS[BUTTON])
     ins['cancel'] = (y+zy,x+zx,len(btn2)-1)
     confwin.refresh()
 
@@ -344,8 +352,8 @@ def configure(win,conf):
                                 curs = curs[0],curs[1]-1
                                 confwin.addch(curs[0]-zy,
                                                curs[1]-zx,
-                                               '_',
-                                               curses.color_pair(WHITE))
+                                               BOFF,
+                                               CPS[WHITE])
                                 confwin.move(curs[0]-zy,curs[1]-zx)
                             else:
                                 if curs[1] > ins['SSID'][1] + ins['SSID'][2]:
@@ -358,7 +366,7 @@ def configure(win,conf):
                                     confwin.addstr(curs[0]-zy,
                                                    curs[1]-zx,
                                                    chr(ev),
-                                                   curses.color_pair(GREEN))
+                                                   CPS[GREEN])
                                     curs = curs[0],curs[1]+1
                                 except ValueError:
                                     # put this back on and see if the outer
@@ -370,27 +378,34 @@ def configure(win,conf):
                     if ins['auto'][1] <= mx <= ins['auto'][1]+ins['auto'][2]:
                         if newconf['connect'] == 'manual':
                             # turn off manual
-                            confwin.addstr(ins['manual'][0]-zy,
-                                           ins['manual'][1]-zx,
-                                           '_',curses.color_pair(WHITE))
+                            confwin.addch(ins['manual'][0]-zy,ins['manual'][1]-zx,
+                                          BOFF,CPS[WHITE])
                         newconf['connect'] = 'auto'
-                        confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                        confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
                         confwin.refresh()
                     elif ins['manual'][1] <= mx <= ins['manual'][1]+ins['manual'][2]:
                         if newconf['connect'] == 'auto':
                             # turn off auto
-                            confwin.addstr(ins['auto'][0]-zy,
-                                           ins['auto'][1]-zx,
-                                           '_',curses.color_pair(WHITE))
+                            confwin.addch(ins['auto'][0]-zy,ins['auto'][1]-zx,
+                                          BOFF,CPS[WHITE])
                         newconf['connect'] = 'manual'
-                        confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                        confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
                         confwin.refresh()
                 else:
                     # check for each listed device
-                    for d in range(j-1):
-                        if my == ins[d+1][0] and ins[d+1][1] <= mx <= ins[d+1][1]+ins[d+1][2]:
-                            confwin.addstr(my-zy,mx-zx,'Y',curses.color_pair(GREEN))
+                    for d in range(j):
+                        if my == ins[d][0] and ins[d][1] <= mx <= ins[d][1]+ins[d][2]:
+                            # check the selected dev
+                            confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
+
+                            # determine if a previously selected needs to be unchecked
+                            if newconf['dev'] is None: pass
+                            elif newconf['dev'] != devs[d]:
+                                i = devs.index(newconf['dev'])
+                                confwin.addch(ins[i][0]-zy,ins[i][1]-zx,BOFF,CPS[WHITE])
+                            newconf['dev'] = devs[d]
                             confwin.refresh()
+                            break # exit the for loop
         else:
             try:
                 ch = chr(ev).upper()
@@ -427,11 +442,13 @@ if __name__ == '__main__':
             ev = mainwin.getch()
             if ev == curses.KEY_MOUSE: pass
             else:
+                # convert the char to uppercase
                 try:
                     ch = chr(ev).upper()
-                except ValueError:
-                    # handle out of range errors from chr
+                except ValueError: # handle out of range errors from chr
                     continue
+
+                # process it
                 if ch == 'C':
                     newconfig = configure(mainwin,config)
                     mainwin.touchwin()
