@@ -9,7 +9,7 @@
   due to occasional "getmouse() returned err". don't know what this is from.
   For now, I catch and continue but this may end up be some unrecoverable error
   and this solution will cause the app to hang.
- 8. in configure do we leave the return as is on Set?
+ 8. in configure do we leave the return as is on Set even if nothing was changed?
    o this could be used to delete/reset config
    o but is user friendly?
  9. checking x length on radio options is pointless
