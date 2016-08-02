@@ -30,4 +30,4 @@ ATT, captiv8 is still in POC mode and has not been packaged and uploaded to PyPI
 Download the captiv8 tarball, untar and execute:
 
 ## 3. USING
-TBD
+ATT terminal must be 80x24 before executing captiv8.

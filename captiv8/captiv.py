@@ -36,6 +36,7 @@ import curses
 import curses.ascii as ascii
 import pyric
 import pyric.pyw as pyw
+import pyric.net.if_h as ifh
 import captiv8
 
 #### CONSTANTS
@@ -64,18 +65,22 @@ _STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
                       'connected','gettingip','verifying','operational']
 
 # FIXED LENGTHS
-_IPLEN_  = 15
-_MACLEN_ = 17
+_IPLEN_   = 15
+_DEVLEN_  = ifh.IFNAMSIZ
+_MACLEN_  = 17
 _SSIDLEN_ = 32
+_FIXLEN_  = 10 # arbitrary fixed field length of 10
 
 # COLORS & COLOR PAIRS
 BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
 CPS = [None] * 10
 
+#### INIT/DEINIT
+
 def setup():
     """
-     sets console and main window up
-     :returns: the main window object, info window object
+     sets environment up and creates main window
+     :returns: the main window object
     """
     # setup the console
     mmask = curses.ALL_MOUSE_EVENTS # for now accept all mouse events
@@ -91,14 +96,26 @@ def setup():
     main.attron(CPS[RED])           # make the border red
     main.border(0)                  # place the border
     main.attroff(CPS[RED])          # turn off the red
-    info = infowindow(main)         # create the info panel/window
     curses.curs_set(0)              # hide the cursor
     main.refresh()                  # and show everything
-    return main,info
+    return main
+
+def teardown(win):
+    """
+     returns console to normal state
+     :param win: the window
+    """
+    # tear down the console
+    curses.nocbreak()
+    win.keypad(0)
+    curses.echo()
+    curses.endwin()
 
 def initcolors():
     """ initialize color pallet """
     curses.start_color()
+    if not curses.has_colors():
+        raise RuntimeError("Sorry. Terminal does not support colors")
     for i in range(1,9):
         curses.init_pair(i,i,BLACK)
         CPS[i] = curses.color_pair(i)
@@ -125,13 +142,15 @@ def banner(win):
     copy = "captiv8 v{0} Copyright {1}".format(captiv8.version,captiv8.__date__)
     win.addstr(len(_BANNER_)+1,(nc-len(copy))/2,copy,CPS[BLUE])
 
+#### WIDGETS SETUP
+
 def mainmenu(win,state=None):
     """
      writes the main menu (caller will need to refresh)
      :param win: the main window
      :param state: current state, None = invalid
     """
-    start = len(_BANNER_)+3
+    start = len(_BANNER_)+2
     win.addstr(start,3, "MENU: choose one",CPS[BLUE])
     win.addstr(start+1,5,"[C|c]onfigure",CPS[WHITE])
 
@@ -153,67 +172,134 @@ def infowindow(win):
     """
      create an info window as derived window of main window win
     :param win: main window
-    :returns: the info window
+    :returns: tuple t = (info window, info window outputs)
     """
-    # try adding a subwindow for info 4 x n
+    # add a derived window center bottom with 9 rows, & a blue border
     nr,nc = win.getmaxyx()
-    info = win.derwin(6,nc-4,nr-7,2)
+    info = win.derwin(9,nc-4,nr-10,2)
+    y, x = info.getmaxyx()
     info.attron(CPS[BLUE])
     info.border(0)
     info.attron(CPS[BLUE])
-    info.refresh()
-    return info
 
-def updateinfo(win,state):
+    # init to None the info window outputs dict
+    # iws = field -> (start_y, start_x,length)
+    iws = {'dev':None,'Driver':None,'Mode':None,      # source fields
+           'MAC':None,'Manuf':None,'Connected':None,
+           'SSID':None,'BSSID':None,                  # target fields
+           'STA:':None,'IP':None}
+
+    # add source info labels
+    info.addstr(0,x-len('SOURCE')-1,'SOURCE',CPS[WHITE])
+    row1 = "dev: {0} Driver: {1} Mode: {1}".format('-'*_DEVLEN_,'-'*_FIXLEN_)
+    row2 = "MAC: {0} Manuf: {1} Connected: -".format('-'*_MACLEN_,'-'*_FIXLEN_)
+    info.addstr(1,1,row1,CPS[WHITE])
+    info.addstr(2,1,row2,CPS[WHITE])
+
+    # add window output fields
+    # row 1
+    r = len('dev: ')+1
+    iws['dev'] = (1,r,_DEVLEN_)
+    r += _DEVLEN_ + len(" Driver: ")
+    iws['Driver'] = (1,r,_FIXLEN_)
+    r += _FIXLEN_ + len(" Mode: ")
+    iws['Mode'] = (1,r,_FIXLEN_)
+    # row 2
+    r = len("MAC: ")+1
+    iws['MAC'] = (2,r,_MACLEN_)
+    r += _MACLEN_ + len(" Manuf: ")
+    iws['Manuf'] = (2,r,_FIXLEN_)
+    r += _FIXLEN_ + len(" Connected: ")
+    iws['Connected'] = (2,r,1)
+
+    # add a horz. line seperating the source and target info panels
+    info.hline(3,1,curses.ACS_HLINE,x-2)
+    info.addstr(3,x-len('TARGET')-1,'TARGET',CPS[WHITE])
+
+    # add our target info labels
+    info.addstr(4,1,"SSID:",CPS[WHITE])
+    info.addstr(4,7,'-'*_SSIDLEN_,CPS[WHITE])
+    info.addstr(4,x-25,"BSSID:",CPS[WHITE])
+    info.addstr(4,x-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
+    info.addstr(5,1,"STA:",CPS[WHITE])
+    info.addstr(5,7,'-'*_MACLEN_,CPS[WHITE])
+    info.addstr(5,x-22,"IP:",CPS[WHITE])
+    info.addstr(5,x-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
+
+    # add the current status at bottom left
+    info.addstr(6,1,"[ ] {0}".format(_STATE_FLAG_NAMES_[_STATE_INVALID_]),CPS[WHITE])
+    info.addch(6,2,ord('?'),CPS[RED])
+    info.refresh()
+    return info, iws
+
+def updateinfo(win,iws,conf,state):
     """
      writes current state to info window
      :param win: the info window
+     :param iws: the info window output dict should be in the form
+      iws = {'dev':None,'Driver':None,'Mode':None,
+           'MAC':None,'Manuf':None,'Connected':None,
+           'SSID':None,'BSSID':None,
+           'STA:':None,'IP':None}
+     :param conf: the current config should be in the form
+      config = {'SSID':None, 'dev':None, 'connect':None}
      :param state: current state
     """
+    # check the conf dict for a device
+    dev = conf['dev']
+    if dev:
+        try:
+            card = pyw.getcard(dev)
+            ifinfo = pyw.ifinfo(card)
+            driver = ifinfo['driver'][:_FIXLEN_] # trim excess
+            hwaddr = ifinfo['hwaddr'].upper()
+            manuf = ifinfo['manufacturer'][:_FIXLEN_] # trim excess
+            mode = pyw.modeget(card)
+            conn = 'Y' if pyw.isconnected(card) else 'N'
+        except pyric.error as e:
+            raise RuntimeError(e)
+        win.addstr(iws['dev'][0],iws['dev'][1],dev,CPS[GREEN])
+        win.addstr(iws['Driver'][0],iws['Driver'][1],driver,CPS[GREEN])
+        win.addstr(iws['Mode'][0],iws['Mode'][1],mode,CPS[GREEN])
+        win.addstr(iws['MAC'][0],iws['MAC'][1],hwaddr,CPS[GREEN])
+        win.addstr(iws['Manuf'][0],iws['Manuf'][1],manuf,CPS[GREEN])
+        win.addstr(iws['Connected'][0],iws['Connected'][1],conn,CPS[GREEN])
+    else:
+        # have to reset: delete anything currently present
+        pass
+
     # line 1, contains the SSID and BSSID entries
     # line 2, contains the MAC and ip entries
-    nr,nc = win.getmaxyx()
-    win.addstr(1,1,"SSID:",CPS[WHITE])
-    win.addstr(1,nc-25,"BSSID:",CPS[WHITE]) # mac is 17 chars
-    win.addstr(2,1,"MAC:",CPS[WHITE])
-    win.addstr(2,nc-22,"IP:",CPS[WHITE])
+    #nr,nc = win.getmaxyx()
+    #win.addstr(1,1,"SSID:",CPS[WHITE])
+    #win.addstr(1,nc-25,"BSSID:",CPS[WHITE]) # mac is 17 chars
+    #win.addstr(2,1,"MAC:",CPS[WHITE])
+    #win.addstr(2,nc-22,"IP:",CPS[WHITE])
 
     # add empty lines
-    win.addstr(1,7,'-'*_SSIDLEN_,CPS[WHITE])
-    win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
-    win.addstr(2,7,'-'*_MACLEN_,CPS[WHITE])
-    win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
+    #win.addstr(1,7,'-'*_SSIDLEN_,CPS[WHITE])
+    #win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
+    #win.addstr(2,7,'-'*_MACLEN_,CPS[WHITE])
+    #win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
 
-    color = CPS[RED]
-    symbol = '?'
-    if state == _STATE_INVALID_: pass
-    elif state == _STATE_CONFIGURED_:
-        color = CPS[RED]
-        symbol = '-'
-    elif state == _STATE_OPERATIONAL_:
-        color = CPS[GREEN]
-        symbol = '+'
-    else:
-        if state == _STATE_STOPPED_: color = CPS[RED]
-        else: color = CPS[YELLOW]
-        symbol = '/'
-    win.addstr(4,1,'[',CPS[WHITE])
-    win.addstr(4,2,symbol,color)
-    win.addstr(4,3,']',CPS[WHITE])
-    win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),CPS[WHITE])
+    #color = CPS[RED]
+    #symbol = '?'
+    #if state == _STATE_INVALID_: pass
+    #elif state == _STATE_CONFIGURED_:
+    #    color = CPS[RED]
+    #    symbol = '-'
+    #elif state == _STATE_OPERATIONAL_:
+    #    color = CPS[GREEN]
+    #    symbol = '+'
+    #else:
+    #    if state == _STATE_STOPPED_: color = CPS[RED]
+    #    else: color = CPS[YELLOW]
+    #    symbol = '/'
+    #win.addstr(4,1,'[',CPS[WHITE])
+    #win.addstr(4,2,symbol,color)
+    #win.addstr(4,3,']',CPS[WHITE])
+    #win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),CPS[WHITE])
     win.refresh()
-
-
-def teardown(win):
-    """
-     returns console to normal state
-     :param win: the window
-    """
-    # tear down the console
-    curses.nocbreak()
-    win.keypad(0)
-    curses.echo()
-    curses.endwin()
 
 #### MENU OPTION CALLBACKS
 
@@ -426,16 +512,16 @@ def configure(win,conf):
     return newconf if store else None
 
 if __name__ == '__main__':
-    _state_ = _STATE_INVALID_
+    state = _STATE_INVALID_
     mainwin = infowin = None
     err = None
+    config = {'SSID': None, 'dev': None, 'connect': None}
     try:
         # get the windows up
-        mainwin,infowin = setup()
-        updateinfo(infowin,_state_)
-
-        # create our data dicts
-        config = {'SSID':None,'dev':None,'connect':None}
+        mainwin = setup()
+        infowin,iws = infowindow(mainwin)
+        mainwin.refresh()
+        #updateinfo(infowin,iws,config, state)
 
         # execution loop
         while True:
@@ -451,22 +537,17 @@ if __name__ == '__main__':
                 # process it
                 if ch == 'C':
                     newconfig = configure(mainwin,config)
+                    if newconfig:
+                        config = newconfig
+                        updateinfo(infowin,iws,config,state)
                     mainwin.touchwin()
                     mainwin.refresh()
-                    if newconfig: config = newconfig
                 elif ch == 'R': pass
                 elif ch == 'V': pass
                 elif ch == 'Q': break
     except KeyboardInterrupt: pass
+    except RuntimeError as e: err = e
     except curses.error as e: err = e
     finally:
         teardown(mainwin)
         if err: print err
-
-"""
-ADDITIONAL STUFF THAT MIGHT COME IN HANDY LATER
-rows, columns = window.getmaxyx()
-curses.use_default_colors() # may make transparency available
-0:black, 1:red, 2:green, 3:yellow, 4:blue, 5:magenta, 6:cyan, and 7:white
-curses.init_pair(1, curses.COLOR_RED, curses.COLOR_WHITE)
-"""

@@ -13,4 +13,9 @@
    o this could be used to delete/reset config
    o but is user friendly?
  9. checking x length on radio options is pointless
-10. check for supports color
+11. Add a info button for chip hw, i.e. driver, chipset, manufacturer and
+ other stuff?
+12. Handle shrink/grow
+  o when shrunk beyond 80x24 and then "regrown", screen does not regenerate/redraw
+13. force check on 80 x 24 when starting
+14. add a clear btn on configure
