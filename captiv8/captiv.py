@@ -141,8 +141,7 @@ def banner(win):
     c = (nc-c)/2
 
     # add each line in the banner
-    for i,line in enumerate(_BANNER_):
-        win.addstr(i+1,c,line,CPS[WHITE])
+    for i,line in enumerate(_BANNER_): win.addstr(i+1,c,line,CPS[WHITE])
 
     # put the copyright in the middle
     copy = "captiv8 v{0} Copyright {1}".format(captiv8.version,captiv8.__date__)
