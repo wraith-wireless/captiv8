@@ -18,7 +18,5 @@
 12. Handle shrink/grow
   o when shrunk beyond 80x24 and then "regrown", screen does not regenerate/redraw
 14. add a clear btn on configure
-16. Need to add a error 'dialog' related to certain errors that are caught inside
- the execution loop and displayed
 18. the color scheme for state symbol is hard to see (may have to do all green)
  or green for connected, white for everything else
