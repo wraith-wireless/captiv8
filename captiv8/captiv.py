@@ -274,7 +274,7 @@ def updatesourceinfo(win,iws,c):
             conn = 'Y' if pyw.isconnected(card) else 'N'
             color = CPS[GREEN]
         except pyric.error as e:
-            raise RuntimeError("ERRNO {0}. {1}".format(e.errno,e.strerror))
+            raise error("ERRNO {0}. {1}".format(e.errno,e.strerror))
     win.addstr(iws['dev'][0],iws['dev'][1],dev,color)
     win.addstr(iws['Driver'][0],iws['Driver'][1],driver,color)
     win.addstr(iws['Mode'][0],iws['Mode'][1],mode,color)
@@ -335,6 +335,71 @@ def updatestateinfo(win,iws,s):
                _STATE_FLAG_NAMES_[state],CPS[WHITE])
     win.refresh()
 
+# noinspection PyUnresolvedReferences
+def errwindow(win,msg):
+    """
+     shows an error msg until user clicks OK
+     :param win: the main window
+     :param msg: the message to display
+    """
+    # set max width & line width
+    nx = 30
+    llen = nx -2
+
+    # break the message up into lines
+    lines = []
+    line = ''
+    for word in msg.split(' '):
+        if len(word) + 1 + len(line) > llen:
+            lines.append(line.strip())
+            line = word
+        else:
+            line += ' ' + word
+    if line: lines.append(line)
+
+    # now calcuate # of rows needed
+    ny = 4 + len(lines) # 2 for border, 2 for title/btn)
+
+    # create the err window with a red border
+    nr,nc = win.getmaxyx()
+    zy = (nr-ny)/2
+    zx = (nc-nx)/2
+    errwin = curses.newwin(ny,nx,zy,zx)
+    errwin.attron(CPS[RED])
+    errwin.border(0)
+    errwin.attron(CPS[RED])
+
+    # display title, message and OK btn
+    errwin.addstr(1,(llen-len("WARNING"))/2,"WARNING",CPS[WHITE])
+    for i,line in enumerate(lines):
+        errwin.addstr(i+2,(llen-len(line))/2,line,CPS[WHITE])
+    btn = "Ok"
+    btncen = (nx-len(btn))/2
+    by,bx = ny-2,btncen-(len(btn)-1)
+    errwin.addstr(by,bx,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    errwin.addstr(by,bx+1,btn[1:],CPS[BUTTON])
+    bs = (by+zy,bx+zx,2)
+
+    # show the win, and take keypad & loop until OK'd
+    errwin.refresh()
+    errwin.keypad(1)
+    while True:
+        ev = errwin.getch()
+        if ev == curses.KEY_MOUSE:
+            try:
+                _,mx,my,_,b = curses.getmouse()
+                if b == curses.BUTTON1_CLICKED:
+                    if my == bs[0] and (bs[1] <= mx <= bs[1] + bs[2]): break
+            except curses.error:
+                continue
+        else:
+            try:
+                ch = chr(ev).upper()
+            except ValueError:
+                continue
+            if ch == 'O': break
+    del errwin
+
 #### MENU OPTION CALLBACKS
 
 # noinspection PyUnresolvedReferences
@@ -353,7 +418,7 @@ def configure(win,conf):
 
     # create a copy of conf to manipulate
     newconf = {}
-    for key in conf: newconf[key] = conf[key]
+    for c in conf: newconf[c] = conf[c]
 
     # create new window (new window will cover the main window)
     # get sizes for coord translation
@@ -368,12 +433,16 @@ def configure(win,conf):
     confwin.attron(CPS[BLUE])
     confwin.addstr(1,1,"Configure Options",CPS[BLUE])
 
-    # ssid option, add if present
+    # ssid option, add if present add a clear button to the right
     confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,CPS[WHITE])
     ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_-1)
     if newconf['SSID']:
         for i,s in enumerate(newconf['SSID']):
             confwin.addch(ins['SSID'][0]-zy,ins['SSID'][1]-zx+i,s,CPS[GREEN])
+    # below is commented out for a clear button
+    #confwin.addstr(2,len("SSID: ") + _SSIDLEN_+ 2,"Clear",CPS[BUTTON])
+    #confwin.addstr(2,len("SSID: ") + _SSIDLEN_+ 3,"l",CPS[BUTTON]|curses.A_UNDERLINE)
+    #ins['clear'] = (2+zy,(len("SSID: ") + _SSIDLEN_+ 2)+zx,len("Clear")-1)
 
     # allow for up to 6 devices to choose in rows of 2 x 3
     confwin.addstr(3,1,"Select dev:",CPS[WHITE]) # the sub title
@@ -495,7 +564,7 @@ def configure(win,conf):
                                     # loop can do something with it
                                     curses.ungetch(ev)
                                     break
-                        curses.curs_set(0) # turn of the cursor
+                        curses.curs_set(0) # turn off the cursor
                 elif my == ins['auto'][0]:
                     if ins['auto'][1] <= mx <= ins['auto'][1]+ins['auto'][2]:
                         if newconf['connect'] == 'manual':
@@ -537,6 +606,8 @@ def configure(win,conf):
                 store = True
                 break
             elif ch == 'C': break
+            elif ch == 'L':
+                pass
 
     # only 'radio buttons' are kept, check if a SSID was entered and add if so
     if store:
@@ -575,11 +646,12 @@ if __name__ == '__main__':
                                 if config[key] is None:
                                     complete = False
                                     break
-                            if complete: state = _STATE_CONFIGURED_
+                            if complete:
+                                state = _STATE_CONFIGURED_
+                                updatestateinfo(infowin, iwfs, state)
                             mainmenu(mainwin,state)
                             updatesourceinfo(infowin,iwfs,config)
                             updatetargetinfo(infowin,iwfs,config)
-                            updatestateinfo(infowin,iwfs,state)
                         mainwin.touchwin()
                         mainwin.refresh()
                     elif ch == 'R': pass
@@ -589,7 +661,9 @@ if __name__ == '__main__':
                 # most likely out of range errors from chr
                 pass
             except error as e:
-                pass # TODO: implement error dialog
+                errwindow(mainwin,e)
+                mainwin.touchwin()
+                mainwin.refresh()
     except KeyboardInterrupt: pass
     except RuntimeError as e: err = e
     except curses.error as e: err = e
