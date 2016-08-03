@@ -61,7 +61,7 @@ _STATE_CONNECTED_   = 5
 _STATE_GETTINGIP_   = 6
 _STATE_VERIFYING_   = 7
 _STATE_OPERATIONAL_ = 8
-_STATE_FLAG_NAMES_ = ['invalid','configure','scanning','stopped','connecting',
+_STATE_FLAG_NAMES_ = ['invalid','configured','scanning','stopped','connecting',
                       'connected','gettingip','verifying','operational']
 
 # FIXED LENGTHS
@@ -75,6 +75,9 @@ _FIXLEN_  = 10 # arbitrary fixed field length of 10
 BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
 CPS = [None] * 10
 
+#### errors
+class error(EnvironmentError): pass
+
 #### INIT/DEINIT
 
 def setup():
@@ -85,6 +88,9 @@ def setup():
     # setup the console
     mmask = curses.ALL_MOUSE_EVENTS # for now accept all mouse events
     main = curses.initscr()         # get a window object
+    y,x = main.getmaxyx()           # get size
+    if y < 24 or x < 80:            # verify minimum size rqmts
+        raise RuntimeError("Terminal must be at least 80 x 24")
     curses.noecho()                 # turn off key echoing
     curses.cbreak()                 # turn off key buffering
     curses.mousemask(mmask)         # accept mouse events
@@ -107,7 +113,7 @@ def teardown(win):
     """
     # tear down the console
     curses.nocbreak()
-    win.keypad(0)
+    if win: win.keypad(0)
     curses.echo()
     curses.endwin()
 
@@ -144,23 +150,23 @@ def banner(win):
 
 #### WIDGETS SETUP
 
-def mainmenu(win,state=None):
+def mainmenu(win,s=None):
     """
      writes the main menu (caller will need to refresh)
      :param win: the main window
-     :param state: current state, None = invalid
+     :param s: current state, None = invalid
     """
     start = len(_BANNER_)+2
     win.addstr(start,3, "MENU: choose one",CPS[BLUE])
     win.addstr(start+1,5,"[C|c]onfigure",CPS[WHITE])
 
     # for the Run option we need to set color and text based on state
-    if state == _STATE_SCANNING_:
+    if s == _STATE_SCANNING_:
         text = "[P|p]ause"
         color = CPS[WHITE]
     else:
         text = "[R|r]un"
-        if state == _STATE_CONFIGURED_ or state == _STATE_STOPPED_:
+        if s == _STATE_CONFIGURED_ or s == _STATE_STOPPED_:
             color = CPS[WHITE]
         else:
             color = CPS[GRAY]
@@ -219,20 +225,26 @@ def infowindow(win):
     # add our target info labels
     info.addstr(4,1,"SSID:",CPS[WHITE])
     info.addstr(4,7,'-'*_SSIDLEN_,CPS[WHITE])
-    info.addstr(4,x-25,"BSSID:",CPS[WHITE])
+    iws['SSID'] = (4,7,_SSIDLEN_)
+    info.addstr(4,x-(len("BSSID: ")+_MACLEN_+1),"BSSID:",CPS[WHITE])
     info.addstr(4,x-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
+    iws['BSSID'] = (4,x-(_MACLEN_+1),_MACLEN_)
     info.addstr(5,1,"STA:",CPS[WHITE])
     info.addstr(5,7,'-'*_MACLEN_,CPS[WHITE])
-    info.addstr(5,x-22,"IP:",CPS[WHITE])
+    iws['STA'] = (5,7,_MACLEN_)
+    info.addstr(5,x-(len("IP: ")+_MACLEN_+1),"IP:",CPS[WHITE]) # right align w/ BSSID
     info.addstr(5,x-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
+    iws['IP'] = (5,x-(_IPLEN_+1),_IPLEN_)
 
     # add the current status at bottom left
     info.addstr(6,1,"[ ] {0}".format(_STATE_FLAG_NAMES_[_STATE_INVALID_]),CPS[WHITE])
     info.addch(6,2,ord('?'),CPS[RED])
+    iws['current'] = (6,2,1)
+    iws['current-msg'] = (6,len("[ ] ")+1,0)
     info.refresh()
     return info, iws
 
-def updateinfo(win,iws,conf,state):
+def updatesourceinfo(win,iws,c):
     """
      writes current state to info window
      :param win: the info window
@@ -240,14 +252,18 @@ def updateinfo(win,iws,conf,state):
       iws = {'dev':None,'Driver':None,'Mode':None,
            'MAC':None,'Manuf':None,'Connected':None,
            'SSID':None,'BSSID':None,
-           'STA:':None,'IP':None}
-     :param conf: the current config should be in the form
+           'STA:':None,'IP':None,
+           'current':None}
+     :param c: the current config should be in the form
       config = {'SSID':None, 'dev':None, 'connect':None}
-     :param state: current state
     """
-    # check the conf dict for a device
-    dev = conf['dev']
-    if dev:
+    # set defaults then check the conf dict for a device
+    dev = c['dev'] if c['dev'] else '-'*_DEVLEN_
+    driver = mode = manuf = '-'*_FIXLEN_
+    hwaddr = '-'*_MACLEN_
+    conn = '-'
+    color = CPS[WHITE]
+    if c['dev']:
         try:
             card = pyw.getcard(dev)
             ifinfo = pyw.ifinfo(card)
@@ -256,53 +272,72 @@ def updateinfo(win,iws,conf,state):
             manuf = ifinfo['manufacturer'][:_FIXLEN_] # trim excess
             mode = pyw.modeget(card)
             conn = 'Y' if pyw.isconnected(card) else 'N'
+            color = CPS[GREEN]
         except pyric.error as e:
-            raise RuntimeError(e)
-        win.addstr(iws['dev'][0],iws['dev'][1],dev,CPS[GREEN])
-        win.addstr(iws['Driver'][0],iws['Driver'][1],driver,CPS[GREEN])
-        win.addstr(iws['Mode'][0],iws['Mode'][1],mode,CPS[GREEN])
-        win.addstr(iws['MAC'][0],iws['MAC'][1],hwaddr,CPS[GREEN])
-        win.addstr(iws['Manuf'][0],iws['Manuf'][1],manuf,CPS[GREEN])
-        win.addstr(iws['Connected'][0],iws['Connected'][1],conn,CPS[GREEN])
+            raise RuntimeError("ERRNO {0}. {1}".format(e.errno,e.strerror))
+    win.addstr(iws['dev'][0],iws['dev'][1],dev,color)
+    win.addstr(iws['Driver'][0],iws['Driver'][1],driver,color)
+    win.addstr(iws['Mode'][0],iws['Mode'][1],mode,color)
+    win.addstr(iws['MAC'][0],iws['MAC'][1],hwaddr,color)
+    win.addstr(iws['Manuf'][0],iws['Manuf'][1],manuf,color)
+    win.addstr(iws['Connected'][0],iws['Connected'][1],conn,color)
+
+def updatetargetinfo(win,iws,c):
+    """
+     writes current state to info window
+     :param win: the info window
+     :param iws: the info window output dict should be in the form
+      iws = {'dev':None,'Driver':None,'Mode':None,
+           'MAC':None,'Manuf':None,'Connected':None,
+           'SSID':None,'BSSID':None,
+           'STA:':None,'IP':None,
+           'current':None}
+     :param c: the current config should be in the form
+      config = {'SSID':None, 'dev':None, 'connect':None}
+    """
+    # TODO: have to also pass data concerning any BSSID/STA/IP data once
+    # connected
+    ssid = '-'*_SSIDLEN_
+    color = CPS[WHITE]
+    if c['SSID']:
+        ssid = c['SSID']
+        color = CPS[GREEN]
+    win.addstr(iws['SSID'][0],iws['SSID'][1],ssid,color)
+
+# noinspection PyUnresolvedReferences
+def updatestateinfo(win,iws,s):
+    """
+     writes current state to info window
+     :param win: the info window
+     :param iws: the info window output dict should be in the form
+      iws = {'dev':None,'Driver':None,'Mode':None,
+           'MAC':None,'Manuf':None,'Connected':None,
+           'SSID':None,'BSSID':None,
+           'STA:':None,'IP':None,
+           'current':None}
+     :param s: current state
+    """
+    color = CPS[RED]
+    symbol = '?'
+    if s == _STATE_INVALID_: pass
+    elif s == _STATE_CONFIGURED_:
+        color = CPS[RED]
+        symbol = '-'
+    elif s == _STATE_OPERATIONAL_:
+        color = CPS[GREEN]
+        symbol = '+'
     else:
-        # have to reset: delete anything currently present
-        pass
-
-    # line 1, contains the SSID and BSSID entries
-    # line 2, contains the MAC and ip entries
-    #nr,nc = win.getmaxyx()
-    #win.addstr(1,1,"SSID:",CPS[WHITE])
-    #win.addstr(1,nc-25,"BSSID:",CPS[WHITE]) # mac is 17 chars
-    #win.addstr(2,1,"MAC:",CPS[WHITE])
-    #win.addstr(2,nc-22,"IP:",CPS[WHITE])
-
-    # add empty lines
-    #win.addstr(1,7,'-'*_SSIDLEN_,CPS[WHITE])
-    #win.addstr(1,nc-(_MACLEN_+1),'-'*_MACLEN_,CPS[WHITE])
-    #win.addstr(2,7,'-'*_MACLEN_,CPS[WHITE])
-    #win.addstr(2,nc-(_IPLEN_+1),'-'*_IPLEN_,CPS[WHITE])
-
-    #color = CPS[RED]
-    #symbol = '?'
-    #if state == _STATE_INVALID_: pass
-    #elif state == _STATE_CONFIGURED_:
-    #    color = CPS[RED]
-    #    symbol = '-'
-    #elif state == _STATE_OPERATIONAL_:
-    #    color = CPS[GREEN]
-    #    symbol = '+'
-    #else:
-    #    if state == _STATE_STOPPED_: color = CPS[RED]
-    #    else: color = CPS[YELLOW]
-    #    symbol = '/'
-    #win.addstr(4,1,'[',CPS[WHITE])
-    #win.addstr(4,2,symbol,color)
-    #win.addstr(4,3,']',CPS[WHITE])
-    #win.addstr(4,5,_STATE_FLAG_NAMES_[state].title(),CPS[WHITE])
+        if s == _STATE_STOPPED_: color = CPS[RED]
+        else: color = CPS[YELLOW]
+        symbol = '/'
+    win.addstr(iws['current'][0],iws["current"][1],symbol,color|curses.A_BOLD)
+    win.addstr(iws['current-msg'][0],iws['current-msg'][1],
+               _STATE_FLAG_NAMES_[state],CPS[WHITE])
     win.refresh()
 
 #### MENU OPTION CALLBACKS
 
+# noinspection PyUnresolvedReferences
 def configure(win,conf):
     """
      shows options to configure captiv8 for running
@@ -345,6 +380,7 @@ def configure(win,conf):
     i = 4 # current row
     j = 0 # current dev
     devs = pyw.winterfaces()[:8]
+    if not newconf['dev'] in devs: newconf['dev'] = None
     for dev in devs:
         stds = ""
         monitor = True
@@ -504,7 +540,8 @@ def configure(win,conf):
 
     # only 'radio buttons' are kept, check if a SSID was entered and add if so
     if store:
-        ssid = confwin.instr(ins['SSID'][0]-zy,ins['SSID'][1]-zx,_SSIDLEN_).strip('_')
+        ssid = confwin.instr(ins['SSID'][0]-zy,ins['SSID'][1]-zx,_SSIDLEN_)
+        ssid = ssid.strip('_').strip() # remove training lines, & spaces
         if ssid: newconf['SSID'] = ssid
 
     # delete this window and return
@@ -519,32 +556,40 @@ if __name__ == '__main__':
     try:
         # get the windows up
         mainwin = setup()
-        infowin,iws = infowindow(mainwin)
+        infowin,iwfs = infowindow(mainwin)
         mainwin.refresh()
-        #updateinfo(infowin,iws,config, state)
 
         # execution loop
         while True:
-            ev = mainwin.getch()
-            if ev == curses.KEY_MOUSE: pass
-            else:
-                # convert the char to uppercase
-                try:
+            try:
+                ev = mainwin.getch()
+                if ev == curses.KEY_MOUSE: pass
+                else:
                     ch = chr(ev).upper()
-                except ValueError: # handle out of range errors from chr
-                    continue
-
-                # process it
-                if ch == 'C':
-                    newconfig = configure(mainwin,config)
-                    if newconfig:
-                        config = newconfig
-                        updateinfo(infowin,iws,config,state)
-                    mainwin.touchwin()
-                    mainwin.refresh()
-                elif ch == 'R': pass
-                elif ch == 'V': pass
-                elif ch == 'Q': break
+                    if ch == 'C':
+                        newconfig = configure(mainwin,config)
+                        if newconfig and cmp(newconfig,config) != 0:
+                            config = newconfig
+                            complete = True
+                            for key in config:
+                                if config[key] is None:
+                                    complete = False
+                                    break
+                            if complete: state = _STATE_CONFIGURED_
+                            mainmenu(mainwin,state)
+                            updatesourceinfo(infowin,iwfs,config)
+                            updatetargetinfo(infowin,iwfs,config)
+                            updatestateinfo(infowin,iwfs,state)
+                        mainwin.touchwin()
+                        mainwin.refresh()
+                    elif ch == 'R': pass
+                    elif ch == 'V': pass
+                    elif ch == 'Q': break
+            except ValueError:
+                # most likely out of range errors from chr
+                pass
+            except error as e:
+                pass # TODO: implement error dialog
     except KeyboardInterrupt: pass
     except RuntimeError as e: err = e
     except curses.error as e: err = e
