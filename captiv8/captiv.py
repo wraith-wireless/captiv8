@@ -618,11 +618,30 @@ def configure(win,conf):
     del confwin  # remove the window
     return newconf if store else None
 
+#### DATA CALLBACKS
+
+
 if __name__ == '__main__':
+    # setup variables
     state = _STATE_INVALID_
     mainwin = infowin = None
     err = None
     config = {'SSID': None, 'dev': None, 'connect': None}
+    ssid = {'ssid':None,'bssids':[]}
+    """
+     ssid = {'ssid':<NAME>,
+               'bssids'=[
+                   {'bssid': <HWADDR>,
+                    'freqs':[<RF1>,RF<2>],
+                    'stas': [
+                        {'mac': <HWADDR>,
+                         'ip': <IPADDR>,
+                         'first': TIME
+                         'last': TIME}
+                    ]
+               ]
+            }
+    """
     try:
         # get the windows up
         mainwin = setup()
