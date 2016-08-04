@@ -24,9 +24,8 @@ it's a paid subscription hotspot or a guest network in your neighborhood with
 whitelisted MACs
 2. You want some anonymity. Of course you could just switch your mac address but
 your traffic is tied to the same MAC. 
-
-a. With captiv8, your traffic will blend in with someone else's
-b. It's a free hotspot but requires some PII to pass the captive portal
+ a. With captiv8, your traffic will blend in with someone else's
+ b. It's a free hotspot but requires some PII to pass the captive portal
 i.e. Last name and room number
 3. You're a legimate hotspot owner or guest network owner and want to test your 
 network/your ability to identify illegitimate access.
