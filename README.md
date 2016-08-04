@@ -18,6 +18,7 @@ of a specified SSID (or ESSID) and identifies potential STAs (clients) to
 masquerade as. 
 
 captiv8 can be used for a variety of reasons: 
+
 1. You're an asshole and your surf for free off of someone else's dime whether
 it's a paid subscription hotspot or a guest network in your neighborhood with 
 whitelisted MACs
