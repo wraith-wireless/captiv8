@@ -34,10 +34,13 @@ __status__ = 'Development'
 
 import curses
 import curses.ascii as ascii
+import multiprocessing as mp
+import time
 import pyric
 import pyric.pyw as pyw
 import pyric.net.if_h as ifh
 import captiv8
+import captiv8.collect as collect
 
 #### CONSTANTS
 
@@ -272,8 +275,8 @@ def updatesourceinfo(win,iws,c):
             mode = pyw.modeget(card)
             conn = 'Y' if pyw.isconnected(card) else 'N'
             color = CPS[GREEN]
-        except pyric.error as e:
-            raise error("ERRNO {0}. {1}".format(e.errno,e.strerror))
+        except pyric.error as _e:
+            raise error("ERRNO {0}. {1}".format(_e.errno,_e.strerror))
     win.addstr(iws['dev'][0],iws['dev'][1],dev,color)
     win.addstr(iws['Driver'][0],iws['Driver'][1],driver,color)
     win.addstr(iws['Mode'][0],iws['Mode'][1],mode,color)
@@ -383,8 +386,8 @@ def errwindow(win,msg):
     errwin.refresh()
     errwin.keypad(1)
     while True:
-        ev = errwin.getch()
-        if ev == curses.KEY_MOUSE:
+        _ev = errwin.getch()
+        if _ev == curses.KEY_MOUSE:
             try:
                 _,mx,my,_,b = curses.getmouse()
                 if b == curses.BUTTON1_CLICKED:
@@ -393,11 +396,13 @@ def errwindow(win,msg):
                 continue
         else:
             try:
-                ch = chr(ev).upper()
+                _ch = chr(_ev).upper()
             except ValueError:
                 continue
-            if ch == 'O': break
+            if _ch == 'O': break
     del errwin
+    win.touchwin()
+    win.refresh()
 
 #### MENU OPTION CALLBACKS
 
@@ -508,8 +513,8 @@ def configure(win,conf):
     confwin.keypad(1) # enable IOT read mouse events
     store = False
     while True:
-        ev = confwin.getch()
-        if ev == curses.KEY_MOUSE:
+        _ev = confwin.getch()
+        if _ev == curses.KEY_MOUSE:
             # handle mouse, determine if we should check/uncheck etc
             try:
                 _,mx,my,_,b = curses.getmouse()
@@ -534,9 +539,9 @@ def configure(win,conf):
                         # loop until we get <ENTER>
                         while True:
                             # get the next char
-                            ev = confwin.getch()
-                            if ev == ascii.NL or ev == curses.KEY_ENTER: break
-                            elif ev == ascii.BS or ev == curses.KEY_BACKSPACE:
+                            _ev = confwin.getch()
+                            if _ev == ascii.NL or _ev == curses.KEY_ENTER: break
+                            elif _ev == ascii.BS or _ev == curses.KEY_BACKSPACE:
                                 if curs[1] == ins['SSID'][1]: continue
                                 # delete (write over with '-') prev char, then move back
                                 curs = curs[0],curs[1]-1
@@ -555,13 +560,13 @@ def configure(win,conf):
                                 try:
                                     confwin.addstr(curs[0]-zy,
                                                    curs[1]-zx,
-                                                   chr(ev),
+                                                   chr(_ev),
                                                    CPS[GREEN])
                                     curs = curs[0],curs[1]+1
                                 except ValueError:
                                     # put this back on and see if the outer
                                     # loop can do something with it
-                                    curses.ungetch(ev)
+                                    curses.ungetch(_ev)
                                     break
                         curses.curs_set(0) # turn off the cursor
                 elif my == ins['auto'][0]:
@@ -598,14 +603,14 @@ def configure(win,conf):
                             break # exit the for loop
         else:
             try:
-                ch = chr(ev).upper()
+                _ch = chr(_ev).upper()
             except ValueError:
                 continue
-            if ch == 'S':
+            if _ch == 'S':
                 store = True
                 break
-            elif ch == 'C': break
-            elif ch == 'L':
+            elif _ch == 'C': break
+            elif _ch == 'L':
                 pass
 
     # only 'radio buttons' are kept, check if a SSID was entered and add if so
@@ -618,30 +623,22 @@ def configure(win,conf):
     del confwin  # remove the window
     return newconf if store else None
 
-#### DATA CALLBACKS
-
-
 if __name__ == '__main__':
-    # setup variables
+    # ui variables
     state = _STATE_INVALID_
     mainwin = infowin = None
     err = None
+
+    # data dicts
     config = {'SSID': None, 'dev': None, 'connect': None}
-    ssid = {'ssid':None,'bssids':[]}
-    """
-     ssid = {'ssid':<NAME>,
-               'bssids'=[
-                   {'bssid': <HWADDR>,
-                    'freqs':[<RF1>,RF<2>],
-                    'stas': [
-                        {'mac': <HWADDR>,
-                         'ip': <IPADDR>,
-                         'first': TIME
-                         'last': TIME}
-                    ]
-               ]
-            }
-    """
+    aps = {}
+    stas = {}
+
+    # collector variables
+    c1 = c2 = None   # pipe connections
+    collector = None # the collector
+
+    # catch curses, runtime and ctrl-c
     try:
         # get the windows up
         mainwin = setup()
@@ -672,7 +669,25 @@ if __name__ == '__main__':
                             updatetargetinfo(infowin,iwfs,config)
                         mainwin.touchwin()
                         mainwin.refresh()
-                    elif ch == 'R': pass
+                    elif ch == 'R':
+                        # only allow run if state is configured, or stopped
+                        if state == _STATE_CONFIGURED_ or state == _STATE_STOPPED_:
+                            mainwin.nodelay(True) # turn off blocking getch
+                            c1,c2 = mp.Pipe()
+                            try:
+                                collector = collect.Collector(c2,
+                                                              config['SSID'],
+                                                              config['dev'],
+                                                              aps,
+                                                              stas)
+                            except RuntimeError as e:
+                                errwindow(mainwin,e.message)
+                            else:
+                                collector.start()
+                                time.sleep(5)
+                                c1.send('!QUIT!')
+                        else:
+                            errwindow(mainwin,"Cannot run. Not Configured")
                     elif ch == 'V': pass
                     elif ch == 'Q': break
             except ValueError:
@@ -680,8 +695,6 @@ if __name__ == '__main__':
                 pass
             except error as e:
                 errwindow(mainwin,e)
-                mainwin.touchwin()
-                mainwin.refresh()
     except KeyboardInterrupt: pass
     except RuntimeError as e: err = e
     except curses.error as e: err = e

@@ -34,56 +34,67 @@ __email__ = 'wraith.wireless@yandex.com'
 __status__ = 'Development'
 
 import multiprocessing as mp
-import Queue
 import pyric
 import pyric.pyw as pyw
 
+# noinspection PyCallByClass
 class Collector(mp.Process):
     """ Collects data on wireless nets """
-    def __init__(self,ssid,dev,conn):
+    def __init__(self,conn,ssid,dev,aps,stas):
         """
          initialize Collector
+         :param conn: pipe connection
          :param ssid: Name of ssid to collect on
          :param dev: device to use for collection
-         :param conn: pipe connection
+         :param aps: AP dict
+         :param stas: STA dict
         """
         mp.Process.__init__(self)
         self._ssid = ssid
         self._dev = dev
         self._conn = conn
+        self._err = None
+        self._oinfo = None  # the original device info
+        self._ocard = None  # the orginal card
+        self._ncard = None  # the new card
+        self._setup()
 
     def run(self):
         """ execution loop """
-        # set up the radio for collection
-        oinfo = None # the original device info
-        ocard = None # the orginal card
-        #ninfo = None # the new device info
-        ncard = None # the new card
-        try:
-            # store the old card and create a new one, deleting any assoc interfaces
-            oinfo = pyw.devinfo(self._dev)
-            ocard = oinfo['card']
-            ncard = pyw.devadd(ocard,'capt0','monitor')
-            #ninfo = pyw.devinfo(ncard)
-            for card,_ in pyw.ifaces(self._dev):
-                if card.dev != ncard.dev:
-                    pyw.devdel(card)
-            if not pyw.isup(ncard): pyw.up(ncard)
-        except pyric.error as e:
-            self._conn.send(('error',"ERRNO {0} {1}".format(e.errno,e.strerror)))
-            return
-
         # ececution loop
         while True:
             if self._conn.poll():
                 tkn = self._conn.recv()
                 if tkn == '!QUIT!': break
 
-        # teardown the radio
+        if not self._teardown():
+            self._conn.send(('!ERR!',self._err))
+        self._conn.close()
+
+    def _setup(self):
+        """ setup radio and tuning thread """
+        # set up the radio for collection
         try:
-            if ncard:
-                ocard = pyw.devadd(ncard,self._dev,oinfo['mode'])
-                pyw.devdel(ncard)
-                if not pyw.isup(ocard): pyw.up(ocard)
+            # store the old card and create a new one, deleting any assoc interfaces
+            self._oinfo = pyw.devinfo(self._dev)
+            self._ocard = self._oinfo['card']
+            self._ncard = pyw.devadd(self._ocard,'capt0','monitor')
+            for card, _ in pyw.ifaces(self._ncard):
+                if card.dev != self._ncard.dev: pyw.devdel(card)
+            if not pyw.isup(self._ncard): pyw.up(self._ncard)
         except pyric.error as e:
-            self._conn.send(('error',"ERRNO {0} {1}".format(e.errno,e.strerror)))
+            raise RuntimeError("ERRNO {0} {1}".format(e.errno, e.strerror))
+
+    def _teardown(self):
+        """ restore radio and wait on tuning thread"""
+        # teardown the radio
+        clean = True
+        try:
+            if self._ncard:
+                self._ocard = pyw.devadd(self._ncard,self._dev,self._oinfo['mode'])
+                pyw.devdel(self._ncard)
+                if not pyw.isup(self._ocard): pyw.up(self._ocard)
+        except pyric.error as e:
+            clean = False
+            self._err = "ERRNO {0} {1}".format(e.errno, e.strerror)
+        return clean
