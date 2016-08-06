@@ -160,11 +160,17 @@ def mainmenu(win,s=None):
     """
     start = len(_BANNER_)+2
     win.addstr(start,3, "MENU: choose one",CPS[BLUE])
-    win.addstr(start+1,5,"[C|c]onfigure",CPS[WHITE])
 
-    # for the Run option we need to set color and text based on state
+    # for each option, set color based on state
+    # configure
+    color = CPS[WHITE]
+    if s == _STATE_SCANNING_ or _STATE_CONNECTING_ <= s < _STATE_OPERATIONAL_:
+        color = CPS[GRAY]
+    win.addstr(start+1,5,"[C|c]onfigure",color)
+
+    # run
     if s == _STATE_SCANNING_:
-        text = "[P|p]ause"
+        text = "[S|s]top"
         color = CPS[WHITE]
     else:
         text = "[R|r]un"
@@ -173,7 +179,13 @@ def mainmenu(win,s=None):
         else:
             color = CPS[GRAY]
     win.addstr(start+2,5,text,color)
-    win.addstr(start+3,5,"[V|v]iew",CPS[WHITE])
+
+    # view
+    color = CPS[WHITE]
+    if s < _STATE_SCANNING_: color = CPS[GRAY]
+    win.addstr(start+3,5,"[V|v]iew",color)
+
+    # quit is always allowed
     win.addstr(start+4,5,"[Q|q]uit",CPS[WHITE])
 
 def infowindow(win):
@@ -653,6 +665,10 @@ if __name__ == '__main__':
                 else:
                     ch = chr(ev).upper()
                     if ch == 'C':
+                        if state == _STATE_SCANNING_\
+                                or _STATE_CONNECTING_ <= state < _STATE_OPERATIONAL_:
+                            errwindow("Cannot configure while running")
+                            continue
                         newconfig = configure(mainwin,config)
                         if newconfig and cmp(newconfig,config) != 0:
                             config = newconfig
@@ -683,12 +699,25 @@ if __name__ == '__main__':
                             except RuntimeError as e:
                                 errwindow(mainwin,e.message)
                             else:
+                                state = _STATE_SCANNING_
                                 collector.start()
-                                time.sleep(5)
-                                c1.send('!QUIT!')
+                                mainmenu(mainwin,state)
                         else:
                             errwindow(mainwin,"Cannot run. Not Configured")
-                    elif ch == 'V': pass
+                    elif ch == 'S':
+                        if not state == _STATE_SCANNING_: continue
+                        if c1: c1.send('!QUIT')
+                        while mp.active_children(): time.sleep(1)
+                        c1.close()
+                        c1 = c2 = collector = None
+                        mainwin.nodelay(False)
+                        state = _STATE_STOPPED_
+                        mainmenu(mainwin,state)
+                    elif ch == 'V':
+                        # only allow view if state is scanning or higher
+                        if state < _STATE_SCANNING_:
+                            errwindow(mainwin,"Cannot view. Nothing to see")
+                            continue
                     elif ch == 'Q': break
             except ValueError:
                 # most likely out of range errors from chr
