@@ -42,7 +42,7 @@ import pyric.pyw as pyw
 import pyric.lib.libnl as nl
 import pyric.utils.channels as channels
 
-BLOCK = 0.200
+SCAN = 0.200
 
 class Tuner(threading.Thread):
     """ tunes radio """
@@ -60,7 +60,7 @@ class Tuner(threading.Thread):
         self._q = q
 
     def run(self):
-        # we'll pull out scan to avoid calling it every BLOCK seconds
+        # we'll pull out scan to avoid calling it every SCAN seconds
         i = 0
         scan = self._scan
         n = len(self._scan)
@@ -68,9 +68,9 @@ class Tuner(threading.Thread):
         # create netlink socket and run through the scan list
         nlsock = nl.nl_socket_alloc()
         while True:
-            # block on the q for BLOCK seconds, if no token, change the channel
+            # block on the q for SCAN seconds, if no token, change the channel
             try:
-                tkn = self._q.get(True,BLOCK)
+                tkn = self._q.get(True,SCAN)
                 if tkn == '!QUIT!': break
             except qempty:
                 i = (i+1) % n
@@ -79,7 +79,6 @@ class Tuner(threading.Thread):
                 except pyric.error:
                     pass
         nl.nl_socket_free(nlsock)
-
 
 # noinspection PyCallByClass
 class Collector(mp.Process):
@@ -95,24 +94,25 @@ class Collector(mp.Process):
         """
         mp.Process.__init__(self)
         self._ssid = ssid   # ssid to scan for
-        self._dev = dev     # radio
+        self._dev = dev     # device name
         self._conn = conn   # connecion to captiv
-        self._tc = None     # connection to tuner
+        self._aps = aps     # AP dict
+        self._stas = stas   # STA dict
+        self._q = None      # tuner queue
         self._tuner = None  # tuner thread
         self._err = None    # err message
-        self._oinfo = None  # the original device info
-        self._ocard = None  # the orginal card
-        self._ncard = None  # the new card
+        self._card = None   # the card to use
+        self._mode = None   # card's orginal mode
         self._setup()
 
     def run(self):
         """ execution loop """
         # ececution loop
+        self._tuner.start()
         while True:
             if self._conn.poll():
                 tkn = self._conn.recv()
                 if tkn == '!QUIT!': break
-
         if not self._teardown():
             self._conn.send(('!ERR!',self._err))
         self._conn.close()
@@ -126,30 +126,31 @@ class Collector(mp.Process):
             nlsock = nl.nl_socket_alloc()
 
             # store the old card and create a new one, deleting any assoc interfaces
-            self._oinfo = pyw.devinfo(self._dev,nlsock)
-            self._ocard = self._oinfo['card']
-            self._ncard = pyw.devadd(self._ocard,'cap8','monitor',None,nlsock)
-            for card, _ in pyw.ifaces(self._ncard,nlsock):
-                if card.dev != self._ncard.dev: pyw.devdel(card,nlsock)
-            if not pyw.isup(self._ncard): pyw.up(self._ncard)
+            self._card = pyw.getcard(self._dev,nlsock)
+            self._mode = pyw.modeget(self._card,nlsock)
+
+
+            if self._mode != 'monitor':
+                pyw.down(self._card)
+                pyw.modeset(self._card,'monitor',None,nlsock)
+                pyw.up(self._card)
 
             # determine scannable channels, then go to first channel
             scan = []
-            for rf in pyw.devfreqs(self._ncard,nlsock):
+            for rf in pyw.devfreqs(self._card,nlsock):
                 for chw in channels.CHTYPES:
                     try:
-                        pyw.freqset(self._ncard,rf,chw,nlsock)
+                        pyw.freqset(self._card,rf,chw,nlsock)
                     except pyric.error:
                         pass
                     else:
                         scan.append((rf, chw))
             assert scan
-            pyw.freqset(self._ncard,scan[0][0],scan[0][1])
+            pyw.freqset(self._card,scan[0][0],scan[0][1])
 
             # start the tuner
             self._q = TQ()
-            self._tuner = Tuner(self._q,self._ncard,scan)
-            self._tuner.start()
+            self._tuner = Tuner(self._q,self._card,scan)
         except (threading.ThreadError,RuntimeError):
             self._teardown()
             raise RuntimeError("Unexepected error in the tuner")
@@ -169,20 +170,25 @@ class Collector(mp.Process):
         """ restore radio and wait on tuning thread"""
         clean = True
 
-        # start with the tuner
-        self._tuner.join(5.0)
+        # notify the tuner to stop
+        if self._q: self._q.put('!QUIT!')
+        if self._tuner: self._tuner.join(5.0)
 
-        # then restore the radio
         try:
-            if self._ncard:
-                self._ocard = pyw.devadd(self._ncard,self._dev,self._oinfo['mode'])
-                pyw.devdel(self._ncard)
-                if not pyw.isup(self._ocard): pyw.up(self._ocard)
+            # then restore the radio
+            if self._card and self._mode != 'monitor':
+                pyw.down(self._card)
+                pyw.modeset(self._card,self._mode)
+                pyw.up(self._card)
+
+            # check if tuner has quit
+            if threading.active_count() > 0:
+                clean = False
+                self._err = "Tuner failed to stop"
         except pyric.error as e:
             clean = False
             self._err = "ERRNO {0} {1}".format(e.errno, e.strerror)
-        if threading.active_count() > 0:
+        except IOError as e:
             clean = False
-            self._err = "Tuner failed to stop"
-        self._conn.close()
+            self._err = "Failed to close comms {0}".format(e.strerror)
         return clean

@@ -35,6 +35,7 @@ __status__ = 'Development'
 import curses
 import curses.ascii as ascii
 import multiprocessing as mp
+import threading
 import time
 import pyric
 import pyric.pyw as pyw
@@ -55,17 +56,18 @@ _BANNER_ = [
 ]
 
 # PROGRAM STATE DEFINITIONS
-_STATE_INVALID_     = 0
-_STATE_CONFIGURED_  = 1
-_STATE_SCANNING_    = 2
-_STATE_STOPPED_     = 3
-_STATE_CONNECTING_  = 4
-_STATE_CONNECTED_   = 5
-_STATE_GETTINGIP_   = 6
-_STATE_VERIFYING_   = 7
-_STATE_OPERATIONAL_ = 8
+_INVALID_     = 0
+_CONFIGURED_  = 1
+_SCANNING_    = 2
+_STOPPED_     = 3
+_CONNECTING_  = 4
+_CONNECTED_   = 5
+_GETTINGIP_   = 6
+_VERIFYING_   = 7
+_OPERATIONAL_ = 8
+_QUITTING_    = 9
 _STATE_FLAG_NAMES_ = ['invalid','configured','scanning','stopped','connecting',
-                      'connected','gettingip','verifying','operational']
+                      'connected','gettingip','verifying','operational','quitting']
 
 # FIXED LENGTHS
 _IPLEN_   = 15
@@ -75,11 +77,64 @@ _SSIDLEN_ = 32
 _FIXLEN_  = 10 # arbitrary fixed field length of 10
 
 # COLORS & COLOR PAIRS
-BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON = range(10)
-CPS = [None] * 10
+COLORS = 13
+BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON,ERR,WARN,NOTE = range(COLORS)
+CPS = [None] * COLORS
 
 #### errors
 class error(EnvironmentError): pass
+
+#### status update thread
+
+class UpdateThread(threading.Thread):
+    """ updates status symbol/statement """
+    def __init__(self,win,block,state,iws):
+        """
+         initialize thread
+         :param win: the info window
+         :param block: blocking event
+         :param state: state dictionary
+         :param iws: the info window output dict should have the following keys:
+           'current', 'current-msg'
+        """
+        threading.Thread.__init__(self)
+        self._win = win
+        self._hold = block
+        self._state = state
+        self._iws = iws
+        self._state = state
+
+    def run(self):
+        """ write current state symbol and info """
+        i = 0
+        symbol = color = None
+
+        # loop until it's time to exit
+        while True:
+            self._hold.wait()
+            s = self._state['state']
+            if s == _QUITTING_: return
+            if s == _INVALID_ or s == _CONFIGURED_:
+                color = CPS[RED]
+                symbol = '?' if s == _INVALID_ else '-'
+            elif s == _OPERATIONAL_:
+                color = CPS[GREEN]
+                symbol = '+'
+            elif s == _QUITTING_:
+                color = CPS[GREEN]
+                symbol = '#'
+            elif s > _CONFIGURED_:
+                color = CPS[YELLOW]
+                symbol = '/' if i else '\\'
+                i = (i+1) % 2
+            self._win.addch(self._iws['current'][0],
+                             self._iws["current"][1],
+                             symbol,color)
+            self._win.addstr(self._iws['current-msg'][0],
+                             self._iws['current-msg'][1],
+                             _STATE_FLAG_NAMES_[s],CPS[WHITE])
+            self._win.refresh()
+            time.sleep(0.1)
 
 #### INIT/DEINIT
 
@@ -125,11 +180,21 @@ def initcolors():
     curses.start_color()
     if not curses.has_colors():
         raise RuntimeError("Sorry. Terminal does not support colors")
+
+    # setup colors on black background
     for i in range(1,9):
         curses.init_pair(i,i,BLACK)
         CPS[i] = curses.color_pair(i)
-    curses.init_pair(BUTTON,WHITE,GRAY) # white on gray for buttons
+
+    # have to individually set up special cases
+    curses.init_pair(BUTTON,WHITE,GRAY)     # white on gray for buttons
     CPS[BUTTON] = curses.color_pair(BUTTON)
+    curses.init_pair(ERR,WHITE,RED)         # white on red
+    CPS[ERR] = curses.color_pair(ERR)
+    curses.init_pair(WARN,BLACK,YELLOW)     # white on yellow
+    CPS[WARN] = curses.color_pair(WARN)
+    curses.init_pair(NOTE,WHITE,GREEN)      # white on red
+    CPS[NOTE] = curses.color_pair(NOTE)
 
 def banner(win):
     """
@@ -164,17 +229,17 @@ def mainmenu(win,s=None):
     # for each option, set color based on state
     # configure
     color = CPS[WHITE]
-    if s == _STATE_SCANNING_ or _STATE_CONNECTING_ <= s < _STATE_OPERATIONAL_:
+    if s == _SCANNING_ or _CONNECTING_ <= s < _OPERATIONAL_:
         color = CPS[GRAY]
     win.addstr(start+1,5,"[C|c]onfigure",color)
 
     # run
-    if s == _STATE_SCANNING_:
+    if s == _SCANNING_:
         text = "[S|s]top"
         color = CPS[WHITE]
     else:
-        text = "[R|r]un"
-        if s == _STATE_CONFIGURED_ or s == _STATE_STOPPED_:
+        text = "[R|r]un " # add a space to cover Stop
+        if s == _CONFIGURED_ or s == _STOPPED_:
             color = CPS[WHITE]
         else:
             color = CPS[GRAY]
@@ -182,7 +247,7 @@ def mainmenu(win,s=None):
 
     # view
     color = CPS[WHITE]
-    if s < _STATE_SCANNING_: color = CPS[GRAY]
+    if s < _SCANNING_: color = CPS[GRAY]
     win.addstr(start+3,5,"[V|v]iew",color)
 
     # quit is always allowed
@@ -197,7 +262,7 @@ def infowindow(win):
     # add a derived window center bottom with 9 rows, & a blue border
     nr,nc = win.getmaxyx()
     info = win.derwin(9,nc-4,nr-10,2)
-    y, x = info.getmaxyx()
+    y,x = info.getmaxyx()
     info.attron(CPS[BLUE])
     info.border(0)
     info.attron(CPS[BLUE])
@@ -251,10 +316,10 @@ def infowindow(win):
     iws['IP'] = (5,x-(_IPLEN_+1),_IPLEN_)
 
     # add the current status at bottom left
-    info.addstr(6,1,"[ ] {0}".format(_STATE_FLAG_NAMES_[_STATE_INVALID_]),CPS[WHITE])
+    info.addstr(6,1,"[ ] {0}".format(_STATE_FLAG_NAMES_[_INVALID_]),CPS[WHITE])
     info.addch(6,2,ord('?'),CPS[RED])
     iws['current'] = (6,2,1)
-    iws['current-msg'] = (6,len("[ ] ")+1,0)
+    iws['current-msg'] = (6,len("[ ] ")+1,x-len("[ ] ")-2)
     info.refresh()
     return info, iws
 
@@ -267,7 +332,8 @@ def updatesourceinfo(win,iws,c):
            'MAC':None,'Manuf':None,'Connected':None,
            'SSID':None,'BSSID':None,
            'STA:':None,'IP':None,
-           'current':None}
+           'current':None,
+           'current-msg'}
      :param c: the current config should be in the form
       config = {'SSID':None, 'dev':None, 'connect':None}
     """
@@ -305,7 +371,8 @@ def updatetargetinfo(win,iws,c):
            'MAC':None,'Manuf':None,'Connected':None,
            'SSID':None,'BSSID':None,
            'STA:':None,'IP':None,
-           'current':None}
+           'current':None,
+           'current-msg':None}
      :param c: the current config should be in the form
       config = {'SSID':None, 'dev':None, 'connect':None}
     """
@@ -328,20 +395,21 @@ def updatestateinfo(win,iws,s):
            'MAC':None,'Manuf':None,'Connected':None,
            'SSID':None,'BSSID':None,
            'STA:':None,'IP':None,
-           'current':None}
+           'current':None,
+           'current-msg':None}
      :param s: current state
     """
     color = CPS[RED]
     symbol = '?'
-    if s == _STATE_INVALID_: pass
-    elif s == _STATE_CONFIGURED_:
+    if s == _INVALID_: pass
+    elif s == _CONFIGURED_:
         color = CPS[RED]
         symbol = '-'
-    elif s == _STATE_OPERATIONAL_:
+    elif s == _OPERATIONAL_:
         color = CPS[GREEN]
         symbol = '+'
     else:
-        if s == _STATE_STOPPED_: color = CPS[RED]
+        if s == _STOPPED_: color = CPS[RED]
         else: color = CPS[YELLOW]
         symbol = '/'
     win.addstr(iws['current'][0],iws["current"][1],symbol,color|curses.A_BOLD)
@@ -350,10 +418,11 @@ def updatestateinfo(win,iws,s):
     win.refresh()
 
 # noinspection PyUnresolvedReferences
-def errwindow(win,msg):
+def msgwindow(win,mtype,msg):
     """
-     shows an error msg until user clicks OK
+     shows an error/warning/note msg until user clicks OK
      :param win: the main window
+     :param mtype: message type one of {'err','warn','note'}
      :param msg: the message to display
     """
     # set max width & line width
@@ -374,31 +443,40 @@ def errwindow(win,msg):
     # now calcuate # of rows needed
     ny = 4 + len(lines) # 2 for border, 2 for title/btn)
 
-    # create the err window with a red border
+    # determine color scheme and title (set default as error
+    title = "ERROR"
+    color = ERR
+    if mtype == 'warn':
+        title = "WARNING"
+        color = WARN
+    elif mtype == 'note':
+        title = "NOTE"
+        color = NOTE
+
+    # create the msg window
     nr,nc = win.getmaxyx()
     zy = (nr-ny)/2
     zx = (nc-nx)/2
-    errwin = curses.newwin(ny,nx,zy,zx)
-    errwin.attron(CPS[RED])
-    errwin.border(0)
-    errwin.attron(CPS[RED])
+    msgwin = curses.newwin(ny,nx,zy,zx)
+    msgwin.bkgd(' ',CPS[color])
+    msgwin.attron(color)
+    msgwin.border(0)
 
     # display title, message and OK btn
-    errwin.addstr(1,(llen-len("WARNING"))/2,"WARNING",CPS[WHITE])
-    for i,line in enumerate(lines):
-        errwin.addstr(i+2,(llen-len(line))/2,line,CPS[WHITE])
+    msgwin.addstr(1,(llen-len(title))/2,title)
+    for i,line in enumerate(lines): msgwin.addstr(i+2,1,line)
     btn = "Ok"
     btncen = (nx-len(btn))/2
     by,bx = ny-2,btncen-(len(btn)-1)
-    errwin.addstr(by,bx,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
-    errwin.addstr(by,bx+1,btn[1:],CPS[BUTTON])
+    msgwin.addstr(by,bx,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    msgwin.addstr(by,bx+1,btn[1:],CPS[BUTTON])
     bs = (by+zy,bx+zx,2)
 
     # show the win, and take keypad & loop until OK'd
-    errwin.refresh()
-    errwin.keypad(1)
+    msgwin.refresh()
+    msgwin.keypad(1)
     while True:
-        _ev = errwin.getch()
+        _ev = msgwin.getch()
         if _ev == curses.KEY_MOUSE:
             try:
                 _,mx,my,_,b = curses.getmouse()
@@ -412,9 +490,54 @@ def errwindow(win,msg):
             except ValueError:
                 continue
             if _ch == 'O': break
-    del errwin
+    del msgwin
     win.touchwin()
     win.refresh()
+
+def waitwindow(win,ttl,msg):
+    """
+     displays a blocking window w/ message
+     :param win: the main window
+     :param ttl: the title (must be less than nx)
+     :param msg: the message
+     :returns: the wait window
+    """
+    # set max width & line width
+    nx = 30
+    llen = nx -2
+
+    # break the message up into lines
+    lines = []
+    line = ''
+    for word in msg.split(' '):
+        if len(word) + 1 + len(line) > llen:
+            lines.append(line.strip())
+            line = word
+        else:
+            line += ' ' + word
+    if line: lines.append(line)
+
+    # now calcuate # of rows needed
+    ny = 3 + len(lines) # 2 for border, 1 for title)
+
+    # create the wait window with a red border
+    nr,nc = win.getmaxyx()
+    zy = (nr-ny)/2
+    zx = (nc-nx)/2
+    waitwin = curses.newwin(ny,nx,zy,zx)
+    waitwin.bkgd(' ',CPS[NOTE])
+    waitwin.attron(NOTE)
+    waitwin.border(0)
+
+    # display title, message and OK btn
+    ttl = ttl[:llen]
+    waitwin.addstr(1,(llen-len(ttl))/2,ttl)
+    for i,line in enumerate(lines): waitwin.addstr(i+2,1,line)
+
+    # show the win, and take the keypad
+    waitwin.refresh()
+    waitwin.keypad(1)
+    return waitwin
 
 #### MENU OPTION CALLBACKS
 
@@ -637,9 +760,12 @@ def configure(win,conf):
 
 if __name__ == '__main__':
     # ui variables
-    state = _STATE_INVALID_
+    # we make state a dict so the update thread can see it
+    dS = {'state':_INVALID_}
     mainwin = infowin = None
     err = None
+    updater = None
+    ublock = threading.Event()
 
     # data dicts
     config = {'SSID': None, 'dev': None, 'connect': None}
@@ -657,6 +783,10 @@ if __name__ == '__main__':
         infowin,iwfs = infowindow(mainwin)
         mainwin.refresh()
 
+        # create the update thread
+        updater = UpdateThread(infowin,ublock,dS,iwfs)
+        updater.start()
+
         # execution loop
         while True:
             try:
@@ -665,9 +795,9 @@ if __name__ == '__main__':
                 else:
                     ch = chr(ev).upper()
                     if ch == 'C':
-                        if state == _STATE_SCANNING_\
-                                or _STATE_CONNECTING_ <= state < _STATE_OPERATIONAL_:
-                            errwindow("Cannot configure while running")
+                        if dS['state'] == _SCANNING_\
+                                or _CONNECTING_ <= dS['state'] < _OPERATIONAL_:
+                            msgwindow(mainwin,'warn',"Cannot configure while running")
                             continue
                         newconfig = configure(mainwin,config)
                         if newconfig and cmp(newconfig,config) != 0:
@@ -678,16 +808,23 @@ if __name__ == '__main__':
                                     complete = False
                                     break
                             if complete:
-                                state = _STATE_CONFIGURED_
-                                updatestateinfo(infowin, iwfs, state)
-                            mainmenu(mainwin,state)
+                                dS['state'] = _CONFIGURED_
+                                #updatestateinfo(infowin,iwfs,state)
+                            mainmenu(mainwin,dS['state'])
                             updatesourceinfo(infowin,iwfs,config)
                             updatetargetinfo(infowin,iwfs,config)
                         mainwin.touchwin()
                         mainwin.refresh()
                     elif ch == 'R':
                         # only allow run if state is configured, or stopped
-                        if state == _STATE_CONFIGURED_ or state == _STATE_STOPPED_:
+                        wwin = None
+                        if dS['state'] == _CONFIGURED_ or dS['state'] == _STOPPED_:
+                            # show a waitwindow while setting up collector
+                            wwin = waitwindow(
+                                mainwin,
+                                "Preparing Device",
+                                "Please wait. Preparing {0}".format(config['dev'])
+                            )
                             mainwin.nodelay(True) # turn off blocking getch
                             c1,c2 = mp.Pipe()
                             try:
@@ -697,36 +834,61 @@ if __name__ == '__main__':
                                                               aps,
                                                               stas)
                             except RuntimeError as e:
-                                errwindow(mainwin,e.message)
+                                if wwin:
+                                    del wwin
+                                    mainwin.touchwin()
+                                    mainwin.refresh()
+                                    wwin = None
+                                msgwindow(mainwin,'err',e.message)
                             else:
-                                state = _STATE_SCANNING_
+                                dS['state'] = _SCANNING_
                                 collector.start()
-                                mainmenu(mainwin,state)
+                                mainmenu(mainwin,dS['state'])
+                                del wwin
+                                mainwin.touchwin()
+                                mainwin.refresh()
+                                ublock.set() # unblock the update
                         else:
-                            errwindow(mainwin,"Cannot run. Not Configured")
+                            msgwindow(mainwin,'warn',"Cannot run. Not Configured")
                     elif ch == 'S':
-                        if not state == _STATE_SCANNING_: continue
-                        if c1: c1.send('!QUIT')
+                        if not dS['state'] == _SCANNING_: continue
+                        if c1: c1.send('!QUIT!')
                         while mp.active_children(): time.sleep(1)
+                        ublock.clear()
                         c1.close()
                         c1 = c2 = collector = None
                         mainwin.nodelay(False)
-                        state = _STATE_STOPPED_
-                        mainmenu(mainwin,state)
+                        dS['state'] = _STOPPED_
+                        mainmenu(mainwin,dS['state'])
                     elif ch == 'V':
                         # only allow view if state is scanning or higher
-                        if state < _STATE_SCANNING_:
-                            errwindow(mainwin,"Cannot view. Nothing to see")
+                        if dS['state'] < _SCANNING_:
+                            msgwindow(mainwin,'warn',"Cannot view. Nothing to see")
                             continue
-                    elif ch == 'Q': break
+                    elif ch == 'Q':
+                        if c1: c1.send('!QUIT!')
+                        while mp.active_children(): time.sleep(1)
+                        ublock.clear()
+                        c1.close()
+                        c1 = c2 = collector = None
+                        mainwin.nodelay(False)
+                        dS['state'] = _QUITTING_
+                        mainmenu(mainwin,dS['state'])
+                        dS['state'] = _QUITTING_
+                        ublock.set() # let the updater catch _QUITTING
+                        break # get ouf the loop
             except ValueError:
                 # most likely out of range errors from chr
                 pass
             except error as e:
-                errwindow(mainwin,e)
+                msgwindow(mainwin,'err',e)
     except KeyboardInterrupt: pass
     except RuntimeError as e: err = e
     except curses.error as e: err = e
     finally:
+        # set state to quitting and unblock if necessary
+        dS['state'] = _QUITTING_
+        if not ublock.is_set(): ublock.set()
+        if updater: updater.join(5.0)
         teardown(mainwin)
         if err: print err
