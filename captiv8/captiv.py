@@ -66,8 +66,17 @@ _GETTINGIP_   = 6
 _VERIFYING_   = 7
 _OPERATIONAL_ = 8
 _QUITTING_    = 9
-_STATE_FLAG_NAMES_ = ['invalid','configured','scanning','stopped','connecting',
-                      'connected','gettingip','verifying','operational','quitting']
+_STATE_FLAG_NAMES_ = [
+    'invalid    ',
+    'configured ',
+    'scanning   ',
+    'stopped    ',
+    'connecting ',
+    'connected  ',
+    'gettingip  ',
+    'verifying  ',
+    'operational',
+    'quitting   ']
 
 # FIXED LENGTHS
 _IPLEN_   = 15
@@ -399,22 +408,21 @@ def updatestateinfo(win,iws,s):
            'current-msg':None}
      :param s: current state
     """
-    color = CPS[RED]
-    symbol = '?'
-    if s == _INVALID_: pass
-    elif s == _CONFIGURED_:
+    color = symbol = None # appease pycharm
+    if s == _INVALID_ or s == _CONFIGURED_:
         color = CPS[RED]
-        symbol = '-'
+        symbol = '?' if s == _INVALID_ else '-'
     elif s == _OPERATIONAL_:
         color = CPS[GREEN]
         symbol = '+'
-    else:
-        if s == _STOPPED_: color = CPS[RED]
-        else: color = CPS[YELLOW]
+    elif s == _QUITTING_:
+        color = CPS[GREEN]
+        symbol = '#'
+    elif s > _CONFIGURED_:
+        color = CPS[YELLOW]
         symbol = '/'
-    win.addstr(iws['current'][0],iws["current"][1],symbol,color|curses.A_BOLD)
-    win.addstr(iws['current-msg'][0],iws['current-msg'][1],
-               _STATE_FLAG_NAMES_[state],CPS[WHITE])
+    win.addch(iws['current'][0],iws["current"][1],symbol,color)
+    win.addstr(iws['current-msg'][0],iws['current-msg'][1],_STATE_FLAG_NAMES_[s],CPS[WHITE])
     win.refresh()
 
 # noinspection PyUnresolvedReferences
@@ -809,7 +817,7 @@ if __name__ == '__main__':
                                     break
                             if complete:
                                 dS['state'] = _CONFIGURED_
-                                #updatestateinfo(infowin,iwfs,state)
+                                updatestateinfo(infowin,iwfs,dS['state'])
                             mainmenu(mainwin,dS['state'])
                             updatesourceinfo(infowin,iwfs,config)
                             updatetargetinfo(infowin,iwfs,config)
@@ -860,22 +868,26 @@ if __name__ == '__main__':
                         mainwin.nodelay(False)
                         dS['state'] = _STOPPED_
                         mainmenu(mainwin,dS['state'])
+                        updatestateinfo(infowin,iwfs,dS['state'])
                     elif ch == 'V':
                         # only allow view if state is scanning or higher
                         if dS['state'] < _SCANNING_:
                             msgwindow(mainwin,'warn',"Cannot view. Nothing to see")
                             continue
+                        # once we add this, we'll have to block the updater
                     elif ch == 'Q':
-                        if c1: c1.send('!QUIT!')
+                        if c1:
+                            c1.send('!QUIT!')
+                            c1.close()
                         while mp.active_children(): time.sleep(1)
                         ublock.clear()
-                        c1.close()
                         c1 = c2 = collector = None
                         mainwin.nodelay(False)
                         dS['state'] = _QUITTING_
                         mainmenu(mainwin,dS['state'])
                         dS['state'] = _QUITTING_
                         ublock.set() # let the updater catch _QUITTING
+
                         break # get ouf the loop
             except ValueError:
                 # most likely out of range errors from chr
