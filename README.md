@@ -28,7 +28,7 @@ your traffic is tied to the same MAC.
     * It's a free hotspot but requires some PII to pass the captive portal
 i.e. Last name and room number
 3. You're a legimate hotspot owner or guest network owner and want to test your 
-network/your ability to identify illegitimate access.
+network/ability to identify illegitimate access.
 
 ## 2. INSTALLING/USING:
 
