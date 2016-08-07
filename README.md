@@ -1,12 +1,11 @@
 # CAPTIV8 0.0.1: Captive Portal Evasion
-## The Evil Twin's Younger Brother
-
             ___     _____   _____  _______  _______  _     _   _____
           _(___)_  (_____) (_____)(__ _ __)(_______)(_)   (_) (_____)
          (_)   (_)(_)___(_)(_)__(_)  (_)      (_)   (_)   (_)(_)___(_)
          (_)    _ (_______)(_____)   (_)      (_)   (_)   (_) (_____)
          (_)___(_)(_)   (_)(_)       (_)    __(_)__  (_)_(_) (_)___(_)
            (___)  (_)   (_)(_)       (_)   (_______)  (___)   (_____)
+## The Evil Twin's Younger Brother
 
 [![License: GPLv3](https://img.shields.io/pypi/l/captiv8.svg)](https://github.com/wraith-wireless/captiv8/blob/master/LICENSE)
 [![PyPI Version](https://img.shields.io/pypi/v/captiv8.svg)](https://pypi.python.org/pypi/captiv8)
