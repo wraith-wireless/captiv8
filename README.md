@@ -19,7 +19,7 @@ masquerade as.
 
 captiv8 can be used for a variety of reasons: 
 
-1. You're an asshole and your surf for free off of someone else's dime whether
+1. You're an asshole and you want to surf for free off of someone else's dime whether
 it's a paid subscription hotspot or a guest network in your neighborhood with 
 whitelisted MACs
 2. You want some anonymity. Of course you could just switch your mac address but
