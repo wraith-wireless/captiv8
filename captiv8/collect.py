@@ -35,14 +35,19 @@ __status__ = 'Development'
 
 import multiprocessing as mp
 import threading
-from Queue import Queue as TQ, Empty as qempty
-import time
+from Queue import Empty
+import select as sselect
+import socket
 import pyric
 import pyric.pyw as pyw
 import pyric.lib.libnl as nl
 import pyric.utils.channels as channels
+import logging                                             # import logging
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR) # to hide ipv6 warning
+import scapy.all as scapy
 
-SCAN = 0.200
+SCAN  = 0.2
+SNIFF = 0.4
 
 class Tuner(threading.Thread):
     """ tunes radio """
@@ -72,13 +77,56 @@ class Tuner(threading.Thread):
             try:
                 tkn = self._q.get(True,SCAN)
                 if tkn == '!QUIT!': break
-            except qempty:
+            except Empty:
                 i = (i+1) % n
                 try:
                     pyw.freqset(self._card,scan[i][0],scan[i][1],nlsock)
                 except pyric.error:
                     pass
         nl.nl_socket_free(nlsock)
+
+class Sniffer(threading.Thread):
+    """ sniffs packets """
+    def __init__(self,tq,pq,dev):
+        """
+         initialize sniffer
+         :param tq: token queue
+         :param pq: packet queue
+         :param dev: the interface to sniff packets from
+        """
+        threading.Thread.__init__(self)
+        self._tq = tq
+        self._pq = pq
+        self._s = None
+        self._setup(dev)
+
+    def run(self):
+        while True:
+            try:
+                tkn = self._tq.get_nowait()
+                if tkn == '!QUIT!': break
+            except Empty:
+                pass
+                # cannot pickle class level functions, no way to pickle q
+                # sniff for predetermine time
+                #scapy.sniff(iface=self._dev,
+                #            prn=self.pkth,
+                #            timeout=SNIFF)
+        self._teardown()
+
+    def _setup(self,dev):
+        try:
+            self._s = socket.socket(socket.AF_PACKET,
+                                    socket.SOCK_RAW,
+                                    socket.htons(0x0003))
+            self._s.settimeout(SNIFF)
+            self._s.bind((dev,0x0003))
+        except socket.error as e:
+            raise RuntimeError(e)
+
+    def _teardown(self):
+        if self._s: self._s.close()
+        self._s = None
 
 # noinspection PyCallByClass
 class Collector(mp.Process):
@@ -93,29 +141,56 @@ class Collector(mp.Process):
          :param stas: STA dict
         """
         mp.Process.__init__(self)
-        self._ssid = ssid   # ssid to scan for
-        self._dev = dev     # device name
-        self._conn = conn   # connecion to captiv
-        self._aps = aps     # AP dict
-        self._stas = stas   # STA dict
-        self._q = None      # tuner queue
-        self._tuner = None  # tuner thread
-        self._err = None    # err message
-        self._card = None   # the card to use
-        self._mode = None   # card's orginal mode
+        self._ssid = ssid    # ssid to scan for
+        self._dev = dev      # device name
+        self._conn = conn    # connecion to captiv
+        self._aps = aps      # AP dict
+        self._stas = stas    # STA dict
+        self._tknq = None    # token queue
+        self._pktq = None    # packet queue
+        self._tuner = None   # tuner thread
+        self._sniffer = None # the sniffer thread
+        self._err = None     # err message
+        self._card = None    # the card to use
+        self._mode = None    # card's orginal mode
         self._setup()
 
     def run(self):
         """ execution loop """
         # ececution loop
         self._tuner.start()
-        while True:
-            if self._conn.poll():
-                tkn = self._conn.recv()
-                if tkn == '!QUIT!': break
-        if not self._teardown():
-            self._conn.send(('!ERR!',self._err))
+        self._sniffer.start()
+        stop = False
+        while not stop:
+            try:
+                rs,_,_ = sselect.select([self._conn,self._pktq._reader],[],[],1)
+                for r in rs:
+                    try:
+                        if r == self._conn:
+                            tkn = self._conn.recv()
+                            if tkn == '!QUIT!': stop = True
+                        else:
+                            self._processpkt()
+                    except Exception as e:
+                        # catchall
+                        self._conn.send('!ERR',"{0} {1}".format(type(e).__name__,e))
+                        break
+            except sselect.error as e:
+                if e[0] == 4: continue
+                else:
+                    self._conn.send('!ERR',"{0} {1}".format(type(e).__name__,e))
+                    break
+        if not self._teardown(): self._conn.send(('!ERR!',self._err))
+        self._conn.send(('!AP!',self._aps))
         self._conn.close()
+
+    def _processpkt(self):
+        """ pulls a packet of the queue and processes it """
+        pkt = self._pktq.get()
+        if not pkt.haslayer(scapy.Dot11): return
+        if pkt.type == 0: # mgmt
+            if pkt.subtype == 8: # beacon
+                self._aps[pkt.info] = pkt.addr2
 
     def _setup(self):
         """ setup radio and tuning thread """
@@ -128,7 +203,6 @@ class Collector(mp.Process):
             # store the old card and create a new one, deleting any assoc interfaces
             self._card = pyw.getcard(self._dev,nlsock)
             self._mode = pyw.modeget(self._card,nlsock)
-
 
             if self._mode != 'monitor':
                 pyw.down(self._card)
@@ -148,12 +222,17 @@ class Collector(mp.Process):
             assert scan
             pyw.freqset(self._card,scan[0][0],scan[0][1])
 
-            # start the tuner
-            self._q = TQ()
-            self._tuner = Tuner(self._q,self._card,scan)
-        except (threading.ThreadError,RuntimeError):
+            # create the tuner & sniffer
+            self._tknq = mp.Queue()
+            self._pktq = mp.Queue()
+            self._tuner = Tuner(self._tknq,self._card,scan)
+            self._sniffer = Sniffer(self._tknq,self._pktq,self._dev)
+        except RuntimeError as e:
             self._teardown()
-            raise RuntimeError("Unexepected error in the tuner")
+            raise RuntimeError("Error binding socket {0}".format(e))
+        except threading.ThreadError as e:
+            self._teardown()
+            raise RuntimeError("Unexepected error in the workers {0}".format(e))
         except AssertionError:
             self._teardown()
             raise RuntimeError("No valid scan channels found")
@@ -170,9 +249,15 @@ class Collector(mp.Process):
         """ restore radio and wait on tuning thread"""
         clean = True
 
-        # notify the tuner to stop
-        if self._q: self._q.put('!QUIT!')
-        if self._tuner: self._tuner.join(5.0)
+        # notify the workers to stop
+        try:
+            for _ in range(threading.active_count()): self._tknq.put('!QUIT!')
+            if self._tuner: self._tuner.join(5.0)
+            if self._sniffer: self._sniffer.join(5.0)
+        except IOError as e:
+            # something failed with the queue
+            clean = False
+            self._err = "Error stopping workers {0}".format(e.strerror)
 
         try:
             # then restore the radio
@@ -184,7 +269,7 @@ class Collector(mp.Process):
             # check if tuner has quit
             if threading.active_count() > 0:
                 clean = False
-                self._err = "Tuner failed to stop"
+                self._err = "One or more workers failed to stop"
         except pyric.error as e:
             clean = False
             self._err = "ERRNO {0} {1}".format(e.errno, e.strerror)

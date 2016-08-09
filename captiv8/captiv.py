@@ -828,11 +828,8 @@ if __name__ == '__main__':
                         wwin = None
                         if dS['state'] == _CONFIGURED_ or dS['state'] == _STOPPED_:
                             # show a waitwindow while setting up collector
-                            wwin = waitwindow(
-                                mainwin,
-                                "Preparing Device",
-                                "Please wait. Preparing {0}".format(config['dev'])
-                            )
+                            msg = "Please wait. Preparing {0}".format(config['dev'])
+                            wwin = waitwindow(mainwin,"Preparing Device",msg)
                             mainwin.nodelay(True) # turn off blocking getch
                             c1,c2 = mp.Pipe()
                             try:
@@ -862,6 +859,16 @@ if __name__ == '__main__':
                         if not dS['state'] == _SCANNING_: continue
                         if c1: c1.send('!QUIT!')
                         while mp.active_children(): time.sleep(1)
+                        while c1.poll():
+                            tkn,data = c1.recv()
+                            if tkn == '!ERR!': pass
+                            elif tkn == '!AP!':
+                                msg = "Found {0} APs".format(len(data))
+                                wwin = waitwindow(mainwin,"APs",msg)
+                                time.sleep(1)
+                                del wwin
+                                mainwin.touchwin()
+                                mainwin.refresh()
                         ublock.clear()
                         c1.close()
                         c1 = c2 = collector = None

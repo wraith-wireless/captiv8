@@ -7,7 +7,7 @@
   but it seems to be the only way to get it to work. Determining the mouse click
   point seems to be based on the main window's coord system, but everything else
   is based on the new window's coord systemq
- 7. have set the execution loop in configure to catch cursess errors on curses.getmouse
+ 7. have set the execution loop in configure to catch curses errors on curses.getmouse
   due to occasional "getmouse() returned err". don't know what this is from.
   For now, I catch and continue but this may end up be some unrecoverable error
   and this solution will cause the app to hang.
@@ -23,3 +23,4 @@
  o harder than it's worth now with everything already present
 18. the color scheme for state symbol is hard to see (may have to do all green)
  or green for connected, white for everything else
+19. add a wait window for stopping scanning and quitting while scanning is active
