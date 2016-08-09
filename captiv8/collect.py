@@ -36,7 +36,7 @@ __status__ = 'Development'
 import multiprocessing as mp
 import threading
 from Queue import Empty
-import select as sselect
+import select as sselect # rename, scapy is intefering
 import socket
 import pyric
 import pyric.pyw as pyw
@@ -106,12 +106,13 @@ class Sniffer(threading.Thread):
                 tkn = self._tq.get_nowait()
                 if tkn == '!QUIT!': break
             except Empty:
-                pass
-                # cannot pickle class level functions, no way to pickle q
-                # sniff for predetermine time
-                #scapy.sniff(iface=self._dev,
-                #            prn=self.pkth,
-                #            timeout=SNIFF)
+                # scapy pickles the callback which leads to errors if the
+                # the callback is not module level - so we read the raw packet
+                try:
+                    pkt = self._s.recv(7935)
+                    self._pq.put(pkt)
+                except socket.timeout:
+                    pass
         self._teardown()
 
     def _setup(self,dev):
@@ -187,10 +188,13 @@ class Collector(mp.Process):
     def _processpkt(self):
         """ pulls a packet of the queue and processes it """
         pkt = self._pktq.get()
+        pkt = scapy.RadioTap(pkt)
         if not pkt.haslayer(scapy.Dot11): return
         if pkt.type == 0: # mgmt
             if pkt.subtype == 8: # beacon
-                self._aps[pkt.info] = pkt.addr2
+                if pkt.info == self._ssid:
+                    if not pkt.addr2 in self._aps:
+                        self._aps[pkt.addr2] = True
 
     def _setup(self):
         """ setup radio and tuning thread """
