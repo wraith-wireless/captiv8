@@ -35,10 +35,13 @@ __status__ = 'Development'
 import curses
 import curses.ascii as ascii
 import multiprocessing as mp
+from Queue import Empty
 import threading
 import time
+import os, sys
 import pyric
 import pyric.pyw as pyw
+from pyric.utils.channels import rf2ch
 import pyric.net.if_h as ifh
 import captiv8
 import captiv8.collect as collect
@@ -95,8 +98,8 @@ class error(EnvironmentError): pass
 
 #### status update thread
 
-class UpdateThread(threading.Thread):
-    """ updates status symbol/statement """
+class InfoUpdateThread(threading.Thread):
+    """ updates Info Window status symbol/statement """
     def __init__(self,win,block,state,iws):
         """
          initialize thread
@@ -111,7 +114,6 @@ class UpdateThread(threading.Thread):
         self._hold = block
         self._state = state
         self._iws = iws
-        self._state = state
 
     def run(self):
         """ write current state symbol and info """
@@ -144,6 +146,74 @@ class UpdateThread(threading.Thread):
                              _STATE_FLAG_NAMES_[s],CPS[WHITE])
             self._win.refresh()
             time.sleep(0.1)
+
+class DataUpdateThread(threading.Thread):
+    """ updates Data dicts and message """
+    def __init__(self,win,block,dq,aps,stas,state,iws):
+        """
+         initialize thread
+         :param win: the info window
+         :param block: blocking event
+         :param dq: data queue
+         :param aps: AP dict
+         :param stas: STA dict
+         :param state: state dict
+         :param iws: the info window output dict should have the following keys:
+           'data-msg'
+        """
+        threading.Thread.__init__(self)
+        self._win = win
+        self._hold = block
+        self._dq = dq
+        self._aps = aps
+        self._stas = stas
+        self._state = state
+        self._iws = iws
+
+    def run(self):
+        # loop until it's time to exit
+        types = {0:'assoc request',5:'probe response',8:'beacon'}
+        while True:
+            self._hold.wait()
+            s = self._state['state']
+            if s == _QUITTING_: return
+            while True:
+                try:
+                    # get the next message and clear the data message field
+                    tkn,data = self._dq.get_nowait()
+                    self._win.addstr(self._iws['data-msg'][0],
+                                     self._iws['data-msg'][1],
+                                     ' '*self._iws['data-msg'][2],
+                                     CPS[WHITE])
+
+                    # process the token
+                    if tkn == '!AP-new!':
+                        bssid,t = data
+                        self._aps[bssid] = {'ch':None}
+                        msg = "Found AP w/ BSSID {0} in {1} frame. Total = {2}"
+                        msg = msg.format(bssid,types[t],len(self._aps))
+                        self._win.addstr(self._iws['data-msg'][0],
+                                         self._iws['data-msg'][1],
+                                         msg,CPS[WHITE])
+                    elif tkn == '!STA-new!':
+                        sta,sinfo = data
+                        self._stas[sta] = sinfo
+                        self._stas[sta]['spoofed'] = 0
+                        self._stas[sta]['success'] = 0
+                        self._aps[self._stas[sta]['ASW']]['ch'] = rf2ch(sinfo['rf'])
+                        msg = "Found STA {0} ASW BSSID {1}".format(sta,sinfo['ASW'])
+                        self._win.addstr(self._iws['data-msg'][0],
+                                         self._iws['data-msg'][1],
+                                         msg,CPS[WHITE])
+                    elif tkn == '!STA-upd!':
+                        sta,sinfo = data
+                        self._stas[sta]['ts'] = sinfo['ts']
+                        self._stas[sta]['rf'] = sinfo['rf']
+                        self._aps[self._stas[sta]['ASW']]['ch'] = rf2ch(sinfo['rf'])
+                    self._win.refresh()
+                except Empty:
+                    time.sleep(0.5)
+                    break
 
 #### INIT/DEINIT
 
@@ -329,6 +399,7 @@ def infowindow(win):
     info.addch(6,2,ord('?'),CPS[RED])
     iws['current'] = (6,2,1)
     iws['current-msg'] = (6,len("[ ] ")+1,x-len("[ ] ")-2)
+    iws['data-msg'] = (7,1,x-2)
     info.refresh()
     return info, iws
 
@@ -336,13 +407,8 @@ def updatesourceinfo(win,iws,c):
     """
      writes current state to info window
      :param win: the info window
-     :param iws: the info window output dict should be in the form
-      iws = {'dev':None,'Driver':None,'Mode':None,
-           'MAC':None,'Manuf':None,'Connected':None,
-           'SSID':None,'BSSID':None,
-           'STA:':None,'IP':None,
-           'current':None,
-           'current-msg'}
+     :param iws: the info window output dict should at minimum the keys
+            'dev','Driver','Mode','MAC','Manuf','Connected',
      :param c: the current config should be in the form
       config = {'SSID':None, 'dev':None, 'connect':None}
     """
@@ -375,37 +441,24 @@ def updatetargetinfo(win,iws,c):
     """
      writes current state to info window
      :param win: the info window
-     :param iws: the info window output dict should be in the form
-      iws = {'dev':None,'Driver':None,'Mode':None,
-           'MAC':None,'Manuf':None,'Connected':None,
-           'SSID':None,'BSSID':None,
-           'STA:':None,'IP':None,
-           'current':None,
-           'current-msg':None}
+     :param iws: the info window output dict should have at minimum the keys
+           'SSID','BSSID','STA','IP'
      :param c: the current config should be in the form
       config = {'SSID':None, 'dev':None, 'connect':None}
     """
     # TODO: have to also pass data concerning any BSSID/STA/IP data once
     # connected
-    ssid = '-'*_SSIDLEN_
-    color = CPS[WHITE]
-    if c['SSID']:
-        ssid = c['SSID']
-        color = CPS[GREEN]
-    win.addstr(iws['SSID'][0],iws['SSID'][1],ssid,color)
+    # overwrite old ssid with blanks before writing new
+    win.addstr(iws['SSID'][0],iws['SSID'][1],'-'*_SSIDLEN_,CPS[WHITE])
+    if c['SSID']: win.addstr(iws['SSID'][0],iws['SSID'][1],c['SSID'],CPS[GREEN])
 
 # noinspection PyUnresolvedReferences
 def updatestateinfo(win,iws,s):
     """
      writes current state to info window
      :param win: the info window
-     :param iws: the info window output dict should be in the form
-      iws = {'dev':None,'Driver':None,'Mode':None,
-           'MAC':None,'Manuf':None,'Connected':None,
-           'SSID':None,'BSSID':None,
-           'STA:':None,'IP':None,
-           'current':None,
-           'current-msg':None}
+     :param iws: the info window output dict should have at minimun the keys
+           'current','current-msg'
      :param s: current state
     """
     color = symbol = None # appease pycharm
@@ -766,23 +819,121 @@ def configure(win,conf):
     del confwin  # remove the window
     return newconf if store else None
 
-if __name__ == '__main__':
-    # ui variables
-    # we make state a dict so the update thread can see it
-    dS = {'state':_INVALID_}
-    mainwin = infowin = None
-    err = None
-    updater = None
-    ublock = threading.Event()
+# noinspection PyUnresolvedReferences
+def view(win,aps,stas):
+    """
+     displays stats on collected entities
+     :param win: the main window
+     :param aps: the ap dict
+     :param stas: the sta dict
+    """
+    # create new window (new window will cover the main window)
+    nr,nc = win.getmaxyx()               # size of the main window
+    ny,nx = 19,62                        # size of new window
+    zy,zx = (nr-ny)/2,(nc-nx)/2          # 0,0 (top left corner) of new window
+    viewwin = curses.newwin(ny,nx,zy,zx) # draw it
+    viewwin.attron(CPS[GREEN])           # and add a green border
+    viewwin.border(0)
+    viewwin.attroff(CPS[GREEN])          # this doesn't seem to have an effect
 
-    # data dicts
+    # add subtitle and data title lines
+    # left side
+    lsub = "APs"
+    lttl = "BSSID              CH STAS"
+    ex = len(lttl) # length of left title
+    viewwin.addstr(2,(ex-len(lsub))/2+1,lsub)
+    viewwin.addstr(3,1,lttl)
+    viewwin.hline(4,1,curses.ACS_HLINE,ex,CPS[GREEN])
+    viewwin.addch(4,ex+1,curses.ACS_UARROW,CPS[BUTTON])
+
+    # right side
+    rx = ex+3 # length of leftsize w/ border and center elements
+    rsub = "Clients"
+    rttl = "STA (MAC)        Tries Succeeds"
+    viewwin.addstr(2,(len(rttl)-len(rsub))/2+rx,rsub)
+    viewwin.addstr(3,rx,rttl)
+    viewwin.hline(4,rx,curses.ACS_HLINE,len(rttl),CPS[GREEN])
+    viewwin.addch(4,len(rttl)+rx,curses.ACS_UARROW,CPS[BUTTON])
+
+    # add footers w/ scroll down buttons (there will be 10 avail. data lines
+    viewwin.hline(15,1,curses.ACS_HLINE,ex,CPS[GREEN])
+    viewwin.addch(15,ex+1,'v',CPS[BUTTON])
+    viewwin.hline(15,rx,curses.ACS_HLINE,len(rttl),CPS[GREEN])
+    viewwin.addch(15,len(rttl)+rx,'v',CPS[BUTTON])
+
+    # along vertical path of scroll areas, draw a gray |
+    ystart = 5
+    maxrows = 10
+    for y in range(ystart,ystart+maxrows):
+        viewwin.addch(y,ex+1,curses.ACS_CKBOARD,CPS[GRAY])
+        viewwin.addch(y, len(rttl) + rx, curses.ACS_CKBOARD, CPS[GRAY])
+
+    # draw a vertical line down the center from data title to data footer
+    for y in range(3,16): viewwin.addch(y,ex+2,curses.ACS_VLINE,CPS[GREEN])
+
+    # add the title and OK button. We want to center them on the subdivde where
+    # APs & clients. They won't be centered then but will appear so
+    title = "View"
+    viewwin.addstr(1,ex,title)
+    btn = "Ok"
+    viewwin.addstr(ny-2,ex+1,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    viewwin.addstr(ny-2,ex+2,btn[1:],CPS[BUTTON])
+    bs = (ny-2+zy,ex+1+zx,2)
+
+    # calculate where each field should go (TODO: add in right align)
+    xbssid = 1
+    xch = _MACLEN_+1
+    xnum = xch+3
+
+    # create a list of AP bssids, append to as new ones come in
+    laps = [bssid.upper() for bssid in aps]
+
+    # take the keyboard, show and loop until ok'd
+    viewwin.keypad(1)
+    viewwin.refresh()
+    while True:
+        # print bssids (up to max)
+        for i,bssid in enumerate(laps):
+            if i < 10:
+                viewwin.addstr(ystart+i,xbssid,bssid)
+            else: break
+
+        # check for user input
+        _ev = viewwin.getch()
+        if _ev == curses.KEY_MOUSE:
+            try:
+                _,mx,my,_,b = curses.getmouse()
+                if b == curses.BUTTON1_CLICKED:
+                    if my == bs[0] and (bs[1] <= mx <= bs[1] + bs[2]): break
+            except curses.error:
+                continue
+        else:
+            try:
+                _ch = chr(_ev).upper()
+            except ValueError:
+                continue
+            if _ch == 'O': break
+    del viewwin
+    win.touchwin()
+    win.refresh()
+
+if __name__ == '__main__':
+    if os.geteuid() != 0: sys.exit("Oops. captiv8 must be run as root")
+    # ui variables
+    # we make state, aps and stas dicts so the update threads can see them
+    mainwin = infowin = None
+    dS = {'state':_INVALID_}
     config = {'SSID': None, 'dev': None, 'connect': None}
     aps = {}
     stas = {}
 
-    # collector variables
-    c1 = c2 = None   # pipe connections
-    collector = None # the collector
+    # helpers
+    c1 = c2 = None             # pipe ends for collector comms
+    dq = mp.Queue()            # data queue for collect, data updater
+    ublock = threading.Event() # event to block updating threads
+    infoupdater = None         # the info message updater
+    dataupdate = None          # the data dict updater
+    collector = None           # the collector
 
     # catch curses, runtime and ctrl-c
     try:
@@ -791,9 +942,11 @@ if __name__ == '__main__':
         infowin,iwfs = infowindow(mainwin)
         mainwin.refresh()
 
-        # create the update thread
-        updater = UpdateThread(infowin,ublock,dS,iwfs)
-        updater.start()
+        # create the info updater thread then the data updater thread
+        infoupdater = InfoUpdateThread(infowin,ublock,dS,iwfs)
+        infoupdater.start()
+        dataupdater = DataUpdateThread(infowin,ublock,dq,aps,stas,dS,iwfs)
+        dataupdater.start()
 
         # execution loop
         while True:
@@ -803,8 +956,7 @@ if __name__ == '__main__':
                 else:
                     ch = chr(ev).upper()
                     if ch == 'C':
-                        if dS['state'] == _SCANNING_\
-                                or _CONNECTING_ <= dS['state'] < _OPERATIONAL_:
+                        if dS['state'] == _SCANNING_ or _CONNECTING_ <= dS['state'] < _OPERATIONAL_:
                             msgwindow(mainwin,'warn',"Cannot configure while running")
                             continue
                         newconfig = configure(mainwin,config)
@@ -834,6 +986,7 @@ if __name__ == '__main__':
                             c1,c2 = mp.Pipe()
                             try:
                                 collector = collect.Collector(c2,
+                                                              dq,
                                                               config['SSID'],
                                                               config['dev'],
                                                               aps,
@@ -852,50 +1005,39 @@ if __name__ == '__main__':
                                 del wwin
                                 mainwin.touchwin()
                                 mainwin.refresh()
-                                ublock.set() # unblock the update
+                                ublock.set() # unblock the updaters
                         else:
                             msgwindow(mainwin,'warn',"Cannot run. Not Configured")
                     elif ch == 'S':
-                        if not dS['state'] == _SCANNING_: continue
-                        if c1: c1.send('!QUIT!')
-                        while mp.active_children(): time.sleep(1)
-                        while c1.poll():
-                            tkn,data = c1.recv()
-                            if tkn == '!ERR!': pass
-                            elif tkn == '!AP!':
-                                msg = "Found {0} APs".format(len(data))
-                                wwin = waitwindow(mainwin,"APs",msg)
-                                time.sleep(1)
-                                del wwin
-                                mainwin.touchwin()
-                                mainwin.refresh()
-                        ublock.clear()
-                        c1.close()
-                        c1 = c2 = collector = None
-                        mainwin.nodelay(False)
-                        dS['state'] = _STOPPED_
-                        mainmenu(mainwin,dS['state'])
-                        updatestateinfo(infowin,iwfs,dS['state'])
+                        if dS['state'] >= _SCANNING_ and dS['state'] != _STOPPED_:
+                            if c1: c1.send('!QUIT!')
+                            while mp.active_children(): time.sleep(1)
+                            ublock.clear()
+                            c1.close()
+                            c1 = c2 = collector = None
+                            mainwin.nodelay(False)
+                            dS['state'] = _STOPPED_
+                            mainmenu(mainwin,dS['state'])
+                            updatestateinfo(infowin,iwfs,dS['state'])
                     elif ch == 'V':
                         # only allow view if state is scanning or higher
-                        if dS['state'] < _SCANNING_:
-                            msgwindow(mainwin,'warn',"Cannot view. Nothing to see")
-                            continue
-                        # once we add this, we'll have to block the updater
+                        #if dS['state'] < _SCANNING_:
+                        #    msgwindow(mainwin,'warn',"Cannot view. Nothing to see")
+                        #    continue
+                        view(mainwin,aps,stas)
+                        # once we add this, we'll have to block the infoupdater
                     elif ch == 'Q':
-                        if c1:
-                            c1.send('!QUIT!')
-                            c1.close()
-                        while mp.active_children(): time.sleep(1)
-                        ublock.clear()
-                        c1 = c2 = collector = None
-                        mainwin.nodelay(False)
-                        dS['state'] = _QUITTING_
-                        mainmenu(mainwin,dS['state'])
-                        dS['state'] = _QUITTING_
-                        ublock.set() # let the updater catch _QUITTING
-
-                        break # get ouf the loop
+                        if dS['state'] >= _SCANNING_ and dS['state'] != _STOPPED_:
+                            if c1: c1.send('!QUIT!')
+                            while mp.active_children(): time.sleep(1)
+                            ublock.clear()
+                            c1 = c2 = collector = None
+                            mainwin.nodelay(False)
+                            dS['state'] = _QUITTING_
+                            mainmenu(mainwin,dS['state'])
+                            updatestateinfo(infowin, iwfs, dS['state'])
+                        ublock.set() # let the updaters catch _QUITTING_
+                        break # get out of  the loop
             except ValueError:
                 # most likely out of range errors from chr
                 pass
@@ -908,6 +1050,5 @@ if __name__ == '__main__':
         # set state to quitting and unblock if necessary
         dS['state'] = _QUITTING_
         if not ublock.is_set(): ublock.set()
-        if updater: updater.join(5.0)
+        if infoupdater: infoupdater.join(5.0)
         teardown(mainwin)
-        if err: print err

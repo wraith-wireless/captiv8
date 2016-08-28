@@ -24,3 +24,14 @@
 18. the color scheme for state symbol is hard to see (may have to do all green)
  or green for connected, white for everything else
 19. add a wait window for stopping scanning and quitting while scanning is active
+20. sniffer is inefficient. Possible to pass a bound socket to init and close
+the socket externally having sniffer quit when the socket fails. but is this good
+ practice?
+21. Pull off STAs that have reassociated within another ESSID
+24. Have te reset the info window status on stopped?
+25. After running, have to recheck if configure is selected and reset aps, stas
+unless same SSID is being used
+27. Have to handle the connection to read/display errors
+28. reset source/target lines after each configure
+ i.e. set SSID to abcdefg then configure to 123, SSID will show as
+  123defg-------- because it only overwrites as long as the ssid is

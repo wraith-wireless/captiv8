@@ -37,8 +37,8 @@ Requires:
 
 __name__ = 'captiv8'
 __license__ = 'GPLv3'
-__version__ = '0.0.1'
-__date__ = 'July 2016'
+__version__ = '0.0.2'
+__date__ = 'August 2016'
 __author__ = 'Dale Patterson'
 __maintainer__ = 'Dale Patterson'
 __email__ = 'wraith.wireless@yandex.com'

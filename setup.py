@@ -61,6 +61,6 @@ setup(name='captiv8',
                    'Programming Language :: Python :: 2.7'],
     keywords='Linux Python pentest hacking wireless WLAN WiFi 802.11',
     packages=find_packages(),
-    install_requires = ['PyRIC']
+    install_requires = ['PyRIC','itamae']
     # TODO: add dependencies
 )
