@@ -80,7 +80,7 @@ class Tuner(threading.Thread):
                 # we didn't lose the card
                 #if not pyw.validcard(card,nlsock): break
                 break
-        nl.nl_socket_alloc()
+        nl.nl_socket_free(nlsock)
 
 class Sniffer(threading.Thread):
     """ sniffs packets """
@@ -197,15 +197,20 @@ class Collector(mp.Process):
         if dM.type == 0: # mgmt
             # for BSSIDs, look at beacon, assoc request, and probe response
             if dM.subtype == 8 or dM.subtype == 0 or dM.subtype == 5:
-                ssids = dM.getie([mpdu.EID_SSID])
-                if ssids and self._ssid in ssids[0]:
+                ssids, = dM.getie([mpdu.EID_SSID])
+                if self._ssid in ssids:
                     if not dM.addr3 in self._aps:
-                        self._aps[dM.addr3] = True
-                        self._datq.put(('!AP-new!',(dM.addr3,dM.subtype)))
+                        self._aps[dM.addr3] = dR.rss
+                        self._datq.put(('!AP-new!',(dM.addr3,self._aps[dM.addr3])))
+                    else:
+                        self._aps[dM.addr3] = dR.rss
+                        self._datq.put(('!AP-upd!',(dM.addr3,self._aps[dM.addr3])))
         elif dM.type == 2: # data
+            rss = None
             if dM.flags['td'] and not dM.flags['fd']:
                 bssid = dM.addr1
                 sta = dM.addr2
+                rss = dR.rss
             elif not dM.flags['td'] and dM.flags['fd']:
                 bssid = dM.addr2
                 sta = dM.addr1
@@ -220,11 +225,13 @@ class Collector(mp.Process):
                 if not sta in self._stas:
                     self._stas[sta] = {'ASW':bssid,
                                        'ts':time.time(),
-                                       'rf':dR.channel}
+                                       'rf':dR.channel,
+                                       'rss':rss}
                     self._datq.put(('!STA-new!',(sta,self._stas[sta])))
                 else:
                     self._stas[sta]['ts'] = time.time()
                     self._stas[sta]['rf'] = dR.channel
+                    if rss: self._stas[sta]['rss'] = rss
                     self._datq.put(('!STA-upd!',(sta,self._stas[sta])))
 
     def _setup(self):
@@ -252,10 +259,9 @@ class Collector(mp.Process):
                 for chw in channels.CHTYPES:
                     try:
                         pyw.freqset(self._card,rf,chw,nlsock)
+                        scan.append((rf, chw))
                     except pyric.error as e:
                         if e.errno != pyric.EINVAL: raise
-                    else:
-                        scan.append((rf, chw))
             assert scan
             pyw.freqset(self._card,scan[0][0],scan[0][1],nlsock)
 

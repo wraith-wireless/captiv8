@@ -24,14 +24,17 @@
 18. the color scheme for state symbol is hard to see (may have to do all green)
  or green for connected, white for everything else
 19. add a wait window for stopping scanning and quitting while scanning is active
-20. sniffer is inefficient. Possible to pass a bound socket to init and close
-the socket externally having sniffer quit when the socket fails. but is this good
- practice?
 21. Pull off STAs that have reassociated within another ESSID
 24. Have te reset the info window status on stopped?
 25. After running, have to recheck if configure is selected and reset aps, stas
 unless same SSID is being used
 27. Have to handle the connection to read/display errors
-28. reset source/target lines after each configure
- i.e. set SSID to abcdefg then configure to 123, SSID will show as
-  123defg-------- because it only overwrites as long as the ssid is
+29. add a reset button to configure window
+30. need better editing capability for ssid in configure window
+32. On view, add number next to bssid i.e. 1., 2., etc.
+33. When running, if you hit run again, message says "cannot run, not configured"
+34. When stopped after running, pressing run again results in
+ Traceback (most recent call last):
+  File "captiv.py", line 1057, in <module>
+    for sta in nets['stas']:
+KeyError: 'stas'

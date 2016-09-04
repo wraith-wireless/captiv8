@@ -41,7 +41,7 @@ import time
 import os, sys
 import pyric
 import pyric.pyw as pyw
-from pyric.utils.channels import rf2ch
+from pyric.utils.channels import rf2ch,ch2rf
 import pyric.net.if_h as ifh
 import captiv8
 import captiv8.collect as collect
@@ -89,8 +89,8 @@ _SSIDLEN_ = 32
 _FIXLEN_  = 10 # arbitrary fixed field length of 10
 
 # COLORS & COLOR PAIRS
-COLORS = 13
-BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON,ERR,WARN,NOTE = range(COLORS)
+COLORS = 14
+BLACK,RED,GREEN,YELLOW,BLUE,MAGENTA,CYAN,WHITE,GRAY,BUTTON,HLITE,ERR,WARN,NOTE = range(COLORS)
 CPS = [None] * COLORS
 
 #### errors
@@ -149,14 +149,13 @@ class InfoUpdateThread(threading.Thread):
 
 class DataUpdateThread(threading.Thread):
     """ updates Data dicts and message """
-    def __init__(self,win,block,dq,aps,stas,state,iws):
+    def __init__(self,win,block,dq,nets,state,iws):
         """
          initialize thread
          :param win: the info window
          :param block: blocking event
          :param dq: data queue
-         :param aps: AP dict
-         :param stas: STA dict
+         :param nets: network dict
          :param state: state dict
          :param iws: the info window output dict should have the following keys:
            'data-msg'
@@ -165,14 +164,12 @@ class DataUpdateThread(threading.Thread):
         self._win = win
         self._hold = block
         self._dq = dq
-        self._aps = aps
-        self._stas = stas
+        self._nets = nets
         self._state = state
         self._iws = iws
 
     def run(self):
         # loop until it's time to exit
-        types = {0:'assoc request',5:'probe response',8:'beacon'}
         while True:
             self._hold.wait()
             s = self._state['state']
@@ -188,28 +185,36 @@ class DataUpdateThread(threading.Thread):
 
                     # process the token
                     if tkn == '!AP-new!':
-                        bssid,t = data
-                        self._aps[bssid] = {'ch':None}
-                        msg = "Found AP w/ BSSID {0} in {1} frame. Total = {2}"
-                        msg = msg.format(bssid,types[t],len(self._aps))
+                        bssid,rss = data
+                        self._nets[bssid] = {'ch':None,'rss':rss,'stas':{}}
+                        msg = "Found AP w/ BSSID {0}. Total = {1}"
+                        msg = msg.format(bssid,len(self._nets))
                         self._win.addstr(self._iws['data-msg'][0],
                                          self._iws['data-msg'][1],
                                          msg,CPS[WHITE])
+                    elif tkn == '!AP-upd!':
+                        bssid,rss = data
+                        self._nets[bssid]['rss'] = rss
                     elif tkn == '!STA-new!':
                         sta,sinfo = data
-                        self._stas[sta] = sinfo
-                        self._stas[sta]['spoofed'] = 0
-                        self._stas[sta]['success'] = 0
-                        self._aps[self._stas[sta]['ASW']]['ch'] = rf2ch(sinfo['rf'])
+                        bssid = sinfo['ASW']
+                        self._nets[bssid]['stas'][sta] = {
+                            'ts':sinfo['ts'],
+                            'rss':sinfo['rss'],
+                            'spoofed':0,
+                            'success':0,
+                        }
+                        self._nets[bssid]['ch'] = rf2ch(sinfo['rf'])
                         msg = "Found STA {0} ASW BSSID {1}".format(sta,sinfo['ASW'])
                         self._win.addstr(self._iws['data-msg'][0],
                                          self._iws['data-msg'][1],
                                          msg,CPS[WHITE])
                     elif tkn == '!STA-upd!':
                         sta,sinfo = data
-                        self._stas[sta]['ts'] = sinfo['ts']
-                        self._stas[sta]['rf'] = sinfo['rf']
-                        self._aps[self._stas[sta]['ASW']]['ch'] = rf2ch(sinfo['rf'])
+                        bssid = sinfo['ASW']
+                        self._nets[bssid]['stas'][sta]['ts'] = sinfo['ts']
+                        self._nets[bssid]['stas'][sta]['rss'] = sinfo['rss']
+                        self._nets[bssid]['ch'] = rf2ch(sinfo['rf'])
                     self._win.refresh()
                 except Empty:
                     time.sleep(0.5)
@@ -268,6 +273,8 @@ def initcolors():
     # have to individually set up special cases
     curses.init_pair(BUTTON,WHITE,GRAY)     # white on gray for buttons
     CPS[BUTTON] = curses.color_pair(BUTTON)
+    curses.init_pair(HLITE,BLACK,GREEN)     # black on Green for highlight aps,stas
+    CPS[HLITE] = curses.color_pair(HLITE)
     curses.init_pair(ERR,WHITE,RED)         # white on red
     CPS[ERR] = curses.color_pair(ERR)
     curses.init_pair(WARN,BLACK,YELLOW)     # white on yellow
@@ -614,7 +621,7 @@ def configure(win,conf):
     BOFF = '_'
 
     # create an inputs dict to hold the begin locations of inputs
-    ins = {} # input -> (start_y,start_x),length)
+    ins = {} # input -> (start_y,start_x,endx)
 
     # create a copy of conf to manipulate
     newconf = {}
@@ -635,14 +642,10 @@ def configure(win,conf):
 
     # ssid option, add if present add a clear button to the right
     confwin.addstr(2,1,"SSID: " + '_'*_SSIDLEN_,CPS[WHITE])
-    ins['SSID'] = (2+zy,len("SSID: ")+zx+1,_SSIDLEN_-1)
+    ins['SSID'] = (2+zy,len("SSID: ")+zx+1,len("SSID: ")+zx+_SSIDLEN_)
     if newconf['SSID']:
         for i,s in enumerate(newconf['SSID']):
             confwin.addch(ins['SSID'][0]-zy,ins['SSID'][1]-zx+i,s,CPS[GREEN])
-    # below is commented out for a clear button
-    #confwin.addstr(2,len("SSID: ") + _SSIDLEN_+ 2,"Clear",CPS[BUTTON])
-    #confwin.addstr(2,len("SSID: ") + _SSIDLEN_+ 3,"l",CPS[BUTTON]|curses.A_UNDERLINE)
-    #ins['clear'] = (2+zy,(len("SSID: ") + _SSIDLEN_+ 2)+zx,len("Clear")-1)
 
     # allow for up to 6 devices to choose in rows of 2 x 3
     confwin.addstr(3,1,"Select dev:",CPS[WHITE]) # the sub title
@@ -665,7 +668,7 @@ def configure(win,conf):
         if stds: devopt += " IEEE 802.11{0}".format(''.join(stds))
         if monitor and nl80211:
             confwin.addstr(i,2,devopt,CPS[WHITE])
-            ins[j] = (i+zy,len("n. (")+zx+2,0)
+            ins[j] = (i+zy,len("n. (")+zx+2,len("n. (")+zx+3)
             if newconf['dev'] == dev:
                 confwin.addch(ins[j][0]-zy,ins[j][1]-zx,BON,CPS[GREEN])
         else:
@@ -681,10 +684,13 @@ def configure(win,conf):
 
     # connect option, select current if present
     confwin.addstr(i,1,"Connect: (_) auto (_) manual",CPS[WHITE])
-    ins['auto'] = (i+zy,len("Connect: (")+zx+1,0)
-    ins['manual'] = (i+zy,len("Connect: (_) auto (")+zx+1,0)
+    ins['auto'] = (i+zy,len("Connect: (")+zx+1,len("Connect: (")+zx+2)
+    ins['manual'] = (i+zy,
+                     len("Connect: (_) auto (")+zx+1,
+                     len("Connect: (_) auto (")+zx+2)
     if newconf['connect']:
-        confwin.addch(ins[newconf['connect']][0]-zy,ins[newconf['connect']][1]-zx,
+        confwin.addch(ins[newconf['connect']][0]-zy,
+                      ins[newconf['connect']][1]-zx,
                       BON,CPS[GREEN])
 
     # we want two buttons Set and Cancel. Make these buttons centered. Underline
@@ -697,12 +703,12 @@ def configure(win,conf):
     y,x = ny-2,btncen-(len(btn1)-1)
     confwin.addstr(y,x,btn1[0],CPS[BUTTON]|curses.A_UNDERLINE)
     confwin.addstr(y,x+1,btn1[1:],CPS[BUTTON])
-    ins['set'] = (y+zy,x+zx,len(btn1)-1)
+    ins['set'] = (y+zy,x+zx,x+zx+len(btn1)-1)
     # btn 2 -> underline first character
     y,x = ny-2,btncen+2
     confwin.addstr(y,x,btn2[0],CPS[BUTTON]|curses.A_UNDERLINE)
     confwin.addstr(y,x+1,btn2[1:],CPS[BUTTON])
-    ins['cancel'] = (y+zy,x+zx,len(btn2)-1)
+    ins['cancel'] = (y+zy,x+zx,x+zx+len(btn2)-1)
     confwin.refresh()
 
     # capture the focus and run our execution loop
@@ -720,13 +726,13 @@ def configure(win,conf):
             if b == curses.BUTTON1_CLICKED:
                 # determine if we're inside a option area
                 if my == ins['set'][0]:
-                    if ins['set'][1] <= mx <= ins['set'][1]+ins['set'][2]:
+                    if ins['set'][1] <= mx <= ins['set'][2]:
                         store = True
                         break
-                    elif ins['cancel'][1] <= mx <= ins['cancel'][1]+ins['cancel'][2]:
+                    elif ins['cancel'][1] <= mx <= ins['cancel'][2]:
                         break
                 elif my == ins['SSID'][0]:
-                    if ins['SSID'][1] <= mx <= ins['SSID'][1]+ins['SSID'][2]:
+                    if ins['SSID'][1] <= mx <= ins['SSID'][2]:
                         # move the cursor to the first entry char & turn on
                         curs = ins['SSID'][0],ins['SSID'][1]
                         confwin.move(curs[0]-zy,curs[1]-zx)
@@ -747,7 +753,7 @@ def configure(win,conf):
                                                CPS[WHITE])
                                 confwin.move(curs[0]-zy,curs[1]-zx)
                             else:
-                                if curs[1] > ins['SSID'][1] + ins['SSID'][2]:
+                                if curs[1] > ins['SSID'][2]:
                                     curses.flash()
                                     continue
 
@@ -766,18 +772,20 @@ def configure(win,conf):
                                     break
                         curses.curs_set(0) # turn off the cursor
                 elif my == ins['auto'][0]:
-                    if ins['auto'][1] <= mx <= ins['auto'][1]+ins['auto'][2]:
+                    if ins['auto'][1] <= mx <= ins['auto'][2]:
                         if newconf['connect'] == 'manual':
                             # turn off manual
-                            confwin.addch(ins['manual'][0]-zy,ins['manual'][1]-zx,
+                            confwin.addch(ins['manual'][0]-zy,
+                                          ins['manual'][1]-zx,
                                           BOFF,CPS[WHITE])
                         newconf['connect'] = 'auto'
                         confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
                         confwin.refresh()
-                    elif ins['manual'][1] <= mx <= ins['manual'][1]+ins['manual'][2]:
+                    elif ins['manual'][1] <= mx <= ins['manual'][2]:
                         if newconf['connect'] == 'auto':
                             # turn off auto
-                            confwin.addch(ins['auto'][0]-zy,ins['auto'][1]-zx,
+                            confwin.addch(ins['auto'][0]-zy,
+                                          ins['auto'][1]-zx,
                                           BOFF,CPS[WHITE])
                         newconf['connect'] = 'manual'
                         confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
@@ -785,7 +793,7 @@ def configure(win,conf):
                 else:
                     # check for each listed device
                     for d in range(j):
-                        if my == ins[d][0] and ins[d][1] <= mx <= ins[d][1]+ins[d][2]:
+                        if my == ins[d][0] and ins[d][1] <= mx <= ins[d][2]:
                             # check the selected dev
                             confwin.addch(my-zy,mx-zx,BON,CPS[GREEN])
 
@@ -793,7 +801,10 @@ def configure(win,conf):
                             if newconf['dev'] is None: pass
                             elif newconf['dev'] != devs[d]:
                                 i = devs.index(newconf['dev'])
-                                confwin.addch(ins[i][0]-zy,ins[i][1]-zx,BOFF,CPS[WHITE])
+                                confwin.addch(ins[i][0]-zy,
+                                              ins[i][1]-zx,
+                                              BOFF,
+                                              CPS[WHITE])
                             newconf['dev'] = devs[d]
                             confwin.refresh()
                             break # exit the for loop
@@ -820,91 +831,183 @@ def configure(win,conf):
     return newconf if store else None
 
 # noinspection PyUnresolvedReferences
-def view(win,aps,stas):
+def view(win,nets):
     """
      displays stats on collected entities
      :param win: the main window
-     :param aps: the ap dict
-     :param stas: the sta dict
+     :param nets: the network dict
     """
     # create new window (new window will cover the main window)
     nr,nc = win.getmaxyx()               # size of the main window
-    ny,nx = 19,62                        # size of new window
-    zy,zx = (nr-ny)/2,(nc-nx)/2          # 0,0 (top left corner) of new window
+    ny,nx = 19,60                        # size of new window
+    zy,zx = 1,(nc-nx)/2                  # 0,0 (top left corner) of new window
     viewwin = curses.newwin(ny,nx,zy,zx) # draw it
     viewwin.attron(CPS[GREEN])           # and add a green border
     viewwin.border(0)
     viewwin.attroff(CPS[GREEN])          # this doesn't seem to have an effect
 
-    # add subtitle and data title lines
-    # left side
-    lsub = "APs"
-    lttl = "BSSID              CH STAS"
-    ex = len(lttl) # length of left title
-    viewwin.addstr(2,(ex-len(lsub))/2+1,lsub)
-    viewwin.addstr(3,1,lttl)
-    viewwin.hline(4,1,curses.ACS_HLINE,ex,CPS[GREEN])
-    viewwin.addch(4,ex+1,curses.ACS_UARROW,CPS[BUTTON])
+    # inputs dict to hold the begin locations of inputs
+    ins = {}  # input -> (start_y,start_x,end_x)
 
-    # right side
-    rx = ex+3 # length of leftsize w/ border and center elements
-    rsub = "Clients"
-    rttl = "STA (MAC)        Tries Succeeds"
-    viewwin.addstr(2,(len(rttl)-len(rsub))/2+rx,rsub)
-    viewwin.addstr(3,rx,rttl)
-    viewwin.hline(4,rx,curses.ACS_HLINE,len(rttl),CPS[GREEN])
-    viewwin.addch(4,len(rttl)+rx,curses.ACS_UARROW,CPS[BUTTON])
-
-    # add footers w/ scroll down buttons (there will be 10 avail. data lines
-    viewwin.hline(15,1,curses.ACS_HLINE,ex,CPS[GREEN])
-    viewwin.addch(15,ex+1,'v',CPS[BUTTON])
-    viewwin.hline(15,rx,curses.ACS_HLINE,len(rttl),CPS[GREEN])
-    viewwin.addch(15,len(rttl)+rx,'v',CPS[BUTTON])
-
-    # along vertical path of scroll areas, draw a gray |
+    # size/location variables
     ystart = 5
-    maxrows = 10
-    for y in range(ystart,ystart+maxrows):
-        viewwin.addch(y,ex+1,curses.ACS_CKBOARD,CPS[GRAY])
-        viewwin.addch(y, len(rttl) + rx, curses.ACS_CKBOARD, CPS[GRAY])
+    apRows = 5
+    staRows = 10
+
+    # add subtitle and data title lines
+    # left side (APs)
+    lsub = "APs"
+    lttl = "BSSID             RSS  CH  #"
+    lL = len(lttl) # length of left title
+    viewwin.addstr(2,(lL-len(lsub))/2+1,lsub)
+    viewwin.addstr(3,1,lttl)
+    viewwin.hline(4,1,curses.ACS_HLINE,lL,CPS[GREEN])
+    viewwin.addch(4,lL+1,curses.ACS_UARROW,CPS[BUTTON])
+    ins['aup'] = (4+zy,lL+1+zx,lL+1+zx)
+
+    # right side (Clients)
+    rx = lL+3 # length of leftsize w/ border and center elements
+    rsub = "Clients"
+    rttl = "STA (MAC)         RSS   S/T"
+    lR = len(rttl)
+    viewwin.addstr(2,(lR-len(rsub))/2+rx,rsub)
+    viewwin.addstr(3,rx,rttl)
+    viewwin.hline(4,rx,curses.ACS_HLINE,lR,CPS[GREEN])
+    viewwin.addch(4,lR+rx,curses.ACS_UARROW,CPS[BUTTON])
+    ins['sup'] = (4+zy,lR+rx+zx,lR+rx+zx)
+
+    # add footers w/ scroll down buttons
+    viewwin.hline(ystart+apRows,1,curses.ACS_HLINE,lL,CPS[GREEN])
+    viewwin.addstr(ystart+apRows+1,1,"APs:")
+    ins['numAPs'] = (ystart+apRows+1,len("APs:")+1,lL)
+    viewwin.addstr(ystart+apRows+2,1,"Clients:")
+    ins['numClts'] = (ystart+apRows+2,len("Clients:")+1,lL)
+    viewwin.hline(ystart+staRows,1,curses.ACS_HLINE,lL+1,CPS[GREEN])
+    viewwin.addch(ystart+apRows,lL+1,'v',CPS[BUTTON])
+    ins['adown'] = (ystart+apRows+zy,lL+1+zx,lL+1+zx)
+    viewwin.hline(ystart+staRows,rx,curses.ACS_HLINE,lR,CPS[GREEN])
+    viewwin.addch(ystart+staRows,lR+rx,'v',CPS[BUTTON])
+    ins['sdown'] = (ystart+staRows+zy,lR+rx+zx,lR+rx+zx)
+
+    # along vertical path of scroll areas, draw a gray checkerboard
+    for y in range(ystart,ystart+apRows):
+        viewwin.addch(y, lL + 1, curses.ACS_CKBOARD, CPS[GRAY])
+    for y in range(ystart,ystart+staRows):
+        viewwin.addch(y,lR+rx,curses.ACS_CKBOARD,CPS[GRAY])
 
     # draw a vertical line down the center from data title to data footer
-    for y in range(3,16): viewwin.addch(y,ex+2,curses.ACS_VLINE,CPS[GREEN])
+    y = None # appease pycharm
+    for y in range(3,ystart+staRows):
+        viewwin.addch(y,lL+2,curses.ACS_VLINE,CPS[GREEN])
+    viewwin.addch(y+1,lL+2,'#',CPS[GREEN])
 
     # add the title and OK button. We want to center them on the subdivde where
     # APs & clients. They won't be centered then but will appear so
     title = "View"
-    viewwin.addstr(1,ex,title)
+    viewwin.addstr(1,lL,title)
     btn = "Ok"
-    viewwin.addstr(ny-2,ex+1,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
-    viewwin.addstr(ny-2,ex+2,btn[1:],CPS[BUTTON])
-    bs = (ny-2+zy,ex+1+zx,2)
+    viewwin.addstr(ny-2,lL+1,btn[0],CPS[BUTTON]|curses.A_UNDERLINE)
+    viewwin.addstr(ny-2,lL+2,btn[1:],CPS[BUTTON])
+    ins['ok'] = (ny-2+zy,lL+1+zx,lL+1+zx+2)
 
-    # calculate where each field should go (TODO: add in right align)
-    xbssid = 1
-    xch = _MACLEN_+1
-    xnum = xch+3
+    # create the ap pad (rows x width of lttl)
+    bssids = nets.keys() # list of initial bssid keys append as new ones come in
+    lsA = []             # list of initial ap lines to write
+    maxA = 30            # maximum 30 bssids (should never reach)
+    curA = 0             # cur index into ap list
+    selA = None          # selected index into ap list
+    aly,alx,ary,arx = zy+ystart,zx+1,zy+ystart+apRows-1,zx+lL
+    apad = curses.newpad(maxA,lL)
 
-    # create a list of AP bssids, append to as new ones come in
-    laps = [bssid.upper() for bssid in aps]
+    # create the clients pad (rows x width of rttl)
+    lsS = []    # list of sta lines to write
+    maxS = 99   # maximum 99 stas
+    curS = 0    # current index into sta list
+    selS = None # selected index into sta list
+    sly,slx,sry,srx = zy+ystart,rx+zx,zy+ystart+staRows-1,zx+rx+lR
+    spad = curses.newpad(maxS,lR)
 
-    # take the keyboard, show and loop until ok'd
+    # fill the ap pad with any initial data (& count ttl number of clients)
+    clnts = 0
+    for i,bssid in enumerate(bssids):
+        if i > maxA: break
+        rss = nets[bssid]['rss']
+        if rss is None: rss = '---'
+        elif rss < -99: rss = -99
+        ch = nets[bssid]['ch']
+        if not ch: ch = '---'
+        nC = len(nets[bssid]['stas'])
+        if nc > maxS: nc = maxS
+        lsA.append("{} {:>3} {:>3} {:>2}".format(bssid,rss,ch,nC))
+        apad.addstr(i,0,lsA[i])
+
+    # update the count of APs and clients
+    viewwin.addstr(ins['numAPs'][0],ins['numAPs'][1]," {0}".format(len(nets)))
+    viewwin.addstr(ins['numClts'][0],ins['numClts'][1]," {0}".format(clnts))
+
+    # take the keyboard, and show this windown prior to refreshing the pads
+    # Move both pads to translated coordinates IOT put them "inside"
+    # the window [y,x upperleft of pad,
+    #             y1,x1 upperleft of win,
+    #             y2,x2 lowerright of win]
     viewwin.keypad(1)
     viewwin.refresh()
-    while True:
-        # print bssids (up to max)
-        for i,bssid in enumerate(laps):
-            if i < 10:
-                viewwin.addstr(ystart+i,xbssid,bssid)
-            else: break
+    apad.refresh(curA,0,aly,alx,ary,arx)
+    spad.refresh(curS,0,sly,slx,sry,srx)
 
+    # show and loop until ok'd
+    while True:
         # check for user input
         _ev = viewwin.getch()
         if _ev == curses.KEY_MOUSE:
             try:
                 _,mx,my,_,b = curses.getmouse()
                 if b == curses.BUTTON1_CLICKED:
-                    if my == bs[0] and (bs[1] <= mx <= bs[1] + bs[2]): break
+                    if aly <= my <= ary and alx <= mx <= arx: # w/in AP range
+                        i = (my-aly)+curA   # index into lsA of selection
+                        try:
+                            # unselect any previously selected bssid & remove
+                            # any clients currently shown
+                            if selA is not None:
+                                apad.addstr(selA,0,lsA[selA],CPS[WHITE])
+                                for j,_ in enumerate(lsS):
+                                    spad.addstr(j,0,' '*lR)
+                                lsS = []
+
+                            # select new (or set to none if deselecting)
+                            if selA == i: selA = None
+                            else:
+                                selA = i
+                                apad.addstr(selA,0,lsA[selA],CPS[HLITE])
+
+                                # show this bssids clients
+                                bssid = bssids[selA]
+                                for j,sta in enumerate(nets[bssid]['stas']):
+                                    rss = nets[bssid]['stas'][sta]['rss']
+                                    if not rss: rss = '---'
+                                    t = nets[bssid]['stas'][sta]['spoofed']
+                                    s = nets[bssid]['stas'][sta]['success']
+                                    spt = "{}/{}".format(s,t)
+                                    lsS.append("{} {:>3} {:>5}".format(sta,rss,spt))
+                                    spad.addstr(j,0,lsS[j])
+
+                            # refresh the bssid & client pads
+                            apad.refresh(curA,0,aly,alx,ary,arx)
+                            spad.refresh(curS,0,sly,slx,sry,srx)
+                        except (IndexError,KeyError):
+                            continue
+                    elif my == ins['ok'][0]:
+                        if ins['ok'][1] <= mx <= ins['ok'][2]: break
+                    elif (my,mx) == (ins['aup'][0],ins['aup'][1]):
+                        if curA == 0: continue
+                        curA -= 1
+                        apad.refresh(curA,0,aly,alx,ary,arx)
+                    elif (my,mx) == (ins['adown'][0],ins['adown'][1]):
+                        if curA >= len(bssids)-apRows: continue
+                        curA += 1
+                        apad.refresh(curA,0,aly,alx,ary,arx)
+                    elif (my,mx) == (ins['aup'][0],ins['sup'][1]): break
+                    elif (my,mx) == (ins['sdown'][0],ins['sdown'][1]): break
             except curses.error:
                 continue
         else:
@@ -921,11 +1024,47 @@ if __name__ == '__main__':
     if os.geteuid() != 0: sys.exit("Oops. captiv8 must be run as root")
     # ui variables
     # we make state, aps and stas dicts so the update threads can see them
+    err = None
     mainwin = infowin = None
     dS = {'state':_INVALID_}
-    config = {'SSID': None, 'dev': None, 'connect': None}
-    aps = {}
-    stas = {}
+    config = {'SSID':None,'dev':None,'connect': None}
+    #nets = {}
+
+    nets = {'d8:c7:c8:f3:fb:60': {'ch': None, 'stas': {}, 'rss': -75},
+            'd8:c7:c8:f4:00:10': {'ch': None, 'stas': {}, 'rss': -90},
+            'd8:c7:c8:f3:fa:10': {'ch': None, 'stas': {}, 'rss': -91},
+            'd8:c7:c8:f3:ff:60': {'ch': None, 'stas': {}, 'rss': -86},
+            'd8:c7:c8:f4:00:60': {'ch': 11, 'stas': {
+                'f4:09:d8:88:ed:63': {'spoofed': 0, 'ts': 1472964477.522748,
+                                      'success': 0, 'rss': -79}}, 'rss': -87},
+            'd8:c7:c8:f3:ff:80': {'ch': 11, 'stas': {
+                'c0:cc:f8:19:2f:17': {'spoofed': 0, 'ts': 1472964500.180947,
+                                      'success': 0, 'rss': -21},
+                '40:f0:2f:cb:ca:f3': {'spoofed': 0, 'ts': 1472964499.963706,
+                                      'success': 0, 'rss': -68},
+                'ac:b5:7d:14:54:76': {'spoofed': 0, 'ts': 1472964499.998591,
+                                      'success': 0, 'rss': -74},
+                'c8:ff:28:31:6a:4b': {'spoofed': 0, 'ts': 1472964455.113911,
+                                      'success': 0, 'rss': -63},
+                'e8:61:7e:6c:a4:e7': {'spoofed': 0, 'ts': 1472964477.567793,
+                                      'success': 0, 'rss': None}}, 'rss': -37},
+            'd8:c7:c8:f3:ff:b0': {'ch': 1, 'stas': {
+                'c4:8e:8f:a6:79:51': {'spoofed': 0, 'ts': 1472964426.521016,
+                                      'success': 0, 'rss': -83},
+                'f8:cf:c5:84:71:43': {'spoofed': 0, 'ts': 1472964448.963282,
+                                      'success': 0, 'rss': -91}}, 'rss': -87},
+            'd8:c7:c8:f3:fc:f0': {'ch': None, 'stas': {}, 'rss': -89},
+            'd8:c7:c8:f3:ff:88': {'ch': 153, 'stas': {
+                '5c:c5:d4:27:42:e6': {'spoofed': 0, 'ts': 1472964379.929878,
+                                      'success': 0, 'rss': -74},
+                '54:4e:90:10:92:8e': {'spoofed': 0, 'ts': 1472964491.085011,
+                                      'success': 0, 'rss': -78},
+                '94:65:9c:73:06:ea': {'spoofed': 0, 'ts': 1472964423.827202,
+                                      'success': 0, 'rss': -59},
+                'd8:fc:93:8b:13:ac': {'spoofed': 0, 'ts': 1472964490.59065,
+                                      'success': 0, 'rss': -77},
+                'a0:cb:fd:7b:c9:4c': {'spoofed': 0, 'ts': 1472964468.864295,
+                                      'success': 0, 'rss': -59}}, 'rss': -47}}
 
     # helpers
     c1 = c2 = None             # pipe ends for collector comms
@@ -945,7 +1084,7 @@ if __name__ == '__main__':
         # create the info updater thread then the data updater thread
         infoupdater = InfoUpdateThread(infowin,ublock,dS,iwfs)
         infoupdater.start()
-        dataupdater = DataUpdateThread(infowin,ublock,dq,aps,stas,dS,iwfs)
+        dataupdater = DataUpdateThread(infowin,ublock,dq,nets,dS,iwfs)
         dataupdater.start()
 
         # execution loop
@@ -985,6 +1124,18 @@ if __name__ == '__main__':
                             mainwin.nodelay(True) # turn off blocking getch
                             c1,c2 = mp.Pipe()
                             try:
+                                # break nets into aps and stas dict
+                                aps = {}
+                                stas = {}
+                                for bssid in nets:
+                                    aps[bssid] = nets[bssid]['rss']
+                                    for sta in nets['stas']:
+                                        stas[sta] = {
+                                            'ASW':bssid,
+                                            'ts':nets[bssid]['stas'][sta]['ts'],
+                                            'rss':nets[bssid]['stas'][sta]['rss'],
+                                            'rf':ch2rf(nets[bssid]['ch'])
+                                        }
                                 collector = collect.Collector(c2,
                                                               dq,
                                                               config['SSID'],
@@ -1024,7 +1175,7 @@ if __name__ == '__main__':
                         #if dS['state'] < _SCANNING_:
                         #    msgwindow(mainwin,'warn',"Cannot view. Nothing to see")
                         #    continue
-                        view(mainwin,aps,stas)
+                        view(mainwin,nets)
                         # once we add this, we'll have to block the infoupdater
                     elif ch == 'Q':
                         if dS['state'] >= _SCANNING_ and dS['state'] != _STOPPED_:
@@ -1052,3 +1203,4 @@ if __name__ == '__main__':
         if not ublock.is_set(): ublock.set()
         if infoupdater: infoupdater.join(5.0)
         teardown(mainwin)
+        if err: sys.exit(err)
